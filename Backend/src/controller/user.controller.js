@@ -25,17 +25,69 @@ const generateTokens = async (user) => {
   return { accessToken, refreshToken };
 };
 
+// 🛠️ Internal Helper (No Res.json here)
+const generateAndSendOTP = async (email) => {
+  const user = await User.findOne({ email });
+  if (!user) throw new ApiError(404, "User not found");
+
+  // Generate 6-digit OTP
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+  user.otp = otp;
+  user.otpExpiry = Date.now() + 10 * 60 * 1000; // 10 mins
+  await user.save({ validateBeforeSave: false });
+
+  const html = `<h2>Your OTP Code</h2><p>Your OTP is: <b>${otp}</b></p>`;
+
+  const info = await mailSender(email, "Your OTP Code", html);
+  if (!info) throw new ApiError(500, "Email not sent");
+
+  return true;
+};
+
+// Send Message to Email
+const SendMessage = async (email, subject, message) => {
+  const user = await User.findOne({ email });
+  if (!user) throw new ApiError(404, "User not found");
+
+  const html = `
+    <div style="font-family: sans-serif; padding: 20px; color: #333;">
+      <h2 style="color: #007bff;">Notification from Our App</h2>
+      <p>Hello ${user.name || "User"},</p>
+      <div style="margin: 20px 0; line-height: 1.6;">
+        ${message}
+      </div>
+      <hr />
+      <p style="font-size: 12px; color: #777;">If you didn't expect this email, please ignore it.</p>
+    </div>
+  `;
+
+  const info = await mailSender(email, subject, html);
+  if (!info) {
+    throw new ApiError(500, "Failed to send the email message");
+  }
+
+  return true;
+};
+
 const login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) throw new ApiError(400, "All fields are required");
+
   const user = await User.findOne({ email });
-  if (user.isVerified === false) throw new ApiError(401, "User not verified");
+  // FIX: Check if user exists BEFORE checking verification status
   if (!user) throw new ApiError(404, "User not found");
+  
+  if (user.isVerified === false) throw new ApiError(401, "User not verified. Please verify your email first.");
+
   const isMatch = await user.isPasswordCorrect(password);
   if (!isMatch) throw new ApiError(400, "Invalid credentials");
+
   const { accessToken, refreshToken } = await generateTokens(user);
+  
   res.cookie("refreshToken", refreshToken, cookieOptions);
   res.cookie("accessToken", accessToken, cookieOptions);
+
   res.json(
     new ApiResponse(200, "Login successful", {
       _id: user._id,
@@ -43,6 +95,7 @@ const login = asyncHandler(async (req, res) => {
       email: user.email,
       avatar: user.avatar,
       isVerified: user.isVerified,
+      oauthImage: user.oauthImage,
     }),
   );
 });
@@ -53,20 +106,35 @@ const signup = asyncHandler(async (req, res) => {
     throw new ApiError(400, "All fields are required");
   if (password !== comparePassword)
     throw new ApiError(400, "Passwords do not match");
+
   const userExists = await User.findOne({ email });
-  if (userExists) throw new ApiError(400, "User already exists");
+  
+  if (userExists) {
+    if (userExists.isVerified === true) {
+      throw new ApiError(400, "User already exists and is verified");
+    } else {
+      // FIX: Added response message here so the request doesn't hang
+      await generateAndSendOTP(email);
+      return res.json(new ApiResponse(200, "User already exists but not verified. A new OTP has been sent to your email."));
+    }
+  }
+
   const user = await User.create({
     name,
     email,
     password,
   });
-  res.json(
-    new ApiResponse(201, "User created successfully", {
+
+  await generateAndSendOTP(email);
+
+  res.status(201).json(
+    new ApiResponse(201, "User created successfully. Verify OTP sent to Email", {
       _id: user._id,
       name: user.name,
       email: user.email,
       avatar: user.avatar,
       isVerified: user.isVerified,
+      oauthImage: user.oauthImage,
     }),
   );
 });
@@ -76,41 +144,49 @@ const sendOTP = asyncHandler(async (req, res) => {
   if (!email) throw new ApiError(400, "Email is required");
   const user = await User.findOne({ email });
   if (!user) throw new ApiError(404, "User not found");
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  user.otp = otp;
-  user.otpExpiry = Date.now() + 10 * 60 * 1000;
-  await user.save({ validateBeforeSave: false });
-  const html=`
-    <h2>Your OTP Code</h2>
-    <p>Your OTP is: <b>${otp}</b></p>
-    <p>This OTP will expire in 10 minutes.</p>
-  `
-  const info=await mailSender(email, "Your OTP Code", html);
-  if (!info) throw new ApiError(500, "Email not sent");
+
+  await generateAndSendOTP(email);
   res.json(new ApiResponse(200, "OTP sent to email"));
 });
 
 const verifyOTP = asyncHandler(async (req, res) => {
   const { email, otp } = req.body;
   if (!email || !otp) throw new ApiError(400, "All fields are required");
+
   const user = await User.findOne({ email });
   if (!user) throw new ApiError(404, "User not found");
 
-  if(user.otp !== otp) throw new ApiError(400, "Invalid OTP");
-  if(user.otpExpiry < Date.now()) throw new ApiError(400, "OTP expired");
+  if (user.otp !== otp) throw new ApiError(400, "Invalid OTP");
+  if (user.otpExpiry < Date.now()) throw new ApiError(400, "OTP expired");
+
   user.isVerified = true;
   user.otp = null;
   user.otpExpiry = null;
   await user.save({ validateBeforeSave: false });
-  res.json(new ApiResponse(200, "OTP verified successfully"));
+
+  // 💡 Strategy: Automatically log user in after verification
+  const { accessToken, refreshToken } = await generateTokens(user);
+  res.cookie("refreshToken", refreshToken, cookieOptions);
+  res.cookie("accessToken", accessToken, cookieOptions);
+
+  res.json(new ApiResponse(200, "OTP verified successfully and logged in", {
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    avatar: user.avatar,
+    isVerified: user.isVerified,
+    oauthImage: user.oauthImage,
+  }));
 });
 
 const logout = asyncHandler(async (req, res) => {
   const user_id = req.user._id;
   const user = await User.findById(user_id);
   if (!user) throw new ApiError(404, "User not found");
+
   user.refreshToken = null;
   await user.save({ validateBeforeSave: false });
+
   res.clearCookie("refreshToken", cookieOptions);
   res.clearCookie("accessToken", cookieOptions);
   res.json(new ApiResponse(200, "Logged out successfully"));
@@ -120,19 +196,24 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
   const oldRefreshToken = req.cookies.refreshToken;
   if (!oldRefreshToken)
     throw new ApiError(401, "Unauthorized - No refresh token");
+
   let decoded;
   try {
     decoded = jwt.verify(oldRefreshToken, process.env.REFRESH_TOKEN_SECRET);
   } catch (err) {
     throw new ApiError(401, "Invalid or expired refresh token");
   }
+
   const user = await User.findById(decoded._id);
   if (!user) throw new ApiError(401, "User not found");
+
   if (user.refreshToken !== oldRefreshToken)
     throw new ApiError(401, "Refresh token mismatch");
+
   const { accessToken, refreshToken } = await generateTokens(user);
   res.cookie("accessToken", accessToken, cookieOptions);
   res.cookie("refreshToken", refreshToken, cookieOptions);
+
   return res.json(
     new ApiResponse(200, "Access token refreshed successfully", {
       accessToken,
@@ -143,29 +224,37 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 const uploadAvatar = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
   if (!user) throw new ApiError(404, "User not found");
+
   if (!req.file?.path) throw new ApiError(400, "No file uploaded");
   if (user.avatar?.public_id) await deletefile(user.avatar.public_id);
+
   const uploadedFile = await uploadOnCloudinary(req.file.path);
   if (!uploadedFile) throw new ApiError(500, "Avatar upload failed");
+
   user.avatar = {
     url: uploadedFile.secure_url,
     public_id: uploadedFile.public_id,
   };
+
   await user.save({ validateBeforeSave: false });
+
   res.json(
     new ApiResponse(200, "Avatar updated successfully", {
-      avatar: user.avatar.url, 
-    })
+      avatar: user.avatar.url,
+    }),
   );
 });
 
 const forgetPassword = asyncHandler(async (req, res) => {
   const { email } = req.body;
   if (!email) throw new ApiError(400, "Email is required");
+
   const user = await User.findOne({ email });
   if (!user) throw new ApiError(404, "User not found");
+
   const resetToken = user.generatePasswordResetToken();
   await user.save({ validateBeforeSave: false });
+
   const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
   const html = `
     <h2>Password Reset</h2>
@@ -174,8 +263,7 @@ const forgetPassword = asyncHandler(async (req, res) => {
     <p>This link will expire in 10 minutes.</p>
   `;
 
-  // 📤 send email
-  const info=await mailSender(email, "Reset Your Password", html);
+  const info = await mailSender(email, "Reset Your Password", html);
   if (!info) throw new ApiError(500, "Email not sent");
   res.json(new ApiResponse(200, "Reset link sent to email"));
 });
@@ -183,27 +271,28 @@ const forgetPassword = asyncHandler(async (req, res) => {
 const resetPassword = asyncHandler(async (req, res) => {
   const { token } = req.params;
   const { newPassword } = req.body;
-  if (!token || !newPassword) throw new ApiError(400, "Token and password required");
-  const hashedToken = crypto
-    .createHash("sha256")
-    .update(token)
-    .digest("hex");
+  if (!token || !newPassword)
+    throw new ApiError(400, "Token and password required");
+
+  const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
 
   const user = await User.findOne({
     passwordResetToken: hashedToken,
     passwordResetExpires: { $gt: Date.now() },
   });
+
   if (!user) throw new ApiError(400, "Invalid or expired token");
+
   user.password = newPassword;
   user.refreshToken = null;
   user.passwordResetToken = null;
   user.passwordResetExpires = null;
   await user.save();
+
   res.json(new ApiResponse(200, "Password reset successful"));
 });
 
-
-export const userController={
+export const userController = {
   login,
   signup,
   sendOTP,
@@ -214,4 +303,3 @@ export const userController={
   forgetPassword,
   resetPassword,
 };
-

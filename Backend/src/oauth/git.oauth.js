@@ -21,6 +21,15 @@ passport.use(
         // 🔍 1. Check if user exists
         let user = await User.findOne({ githubId });
 
+        if (!user && email) {
+          user = await User.findOne({ email });
+          if (user) {
+            user.githubId = githubId;
+            user.isVerified = true; // OAuth users are trusted
+            user.oauthImage = oauthImage;
+            await user.save({ validateBeforeSave: false });
+          }
+        }
         // 🆕 2. If not → create
         if (!user) {
           user = await User.create({
@@ -33,10 +42,9 @@ passport.use(
         }
 
         return done(null, user);
-
       } catch (err) {
         return done(err, null);
       }
-    }
-  )
+    },
+  ),
 );

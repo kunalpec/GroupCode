@@ -28,7 +28,7 @@ const socketAuthMiddleware = async (socket, next) => {
     // Only assign and save color if it doesn't exist
     if (!user.userColor) {
       user.userColor = generateRandomHex();
-      await user.save();
+      await user.save({ validateBeforeSave: false });
     }
 
     // Attach to socket

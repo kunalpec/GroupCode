@@ -7,42 +7,44 @@ import { socketAuthMiddleware } from "../middleware/socket.middleware.js";
 
 let io;
 
-// roomId → Set(userId)
+// room_inviteToken → Set(userId)
 const roomUsers = new Map();
 
 // userId → socket.id
 const userSocketMap = new Map();
 
-// roomId → containerId
+// room_inviteToken → containerId
 export const roomContainerMap = new Map();
 
-// roomId → shell process
+// room_inviteToken → shell process
 const roomShellMap = new Map();
 
-// 🔧 Helper: Add user safely
+// =========================
+// 🔧 Helper
+// =========================
 async function addUserToRoom(room, socket) {
-  const { userId, roomId } = socket;
+  const { userId, room_inviteToken } = socket;
 
-  // DB
   if (!room.users.includes(userId)) {
     room.users.push(userId);
     await room.save();
   }
 
-  // Memory
-  if (!roomUsers.has(roomId)) {
-    roomUsers.set(roomId, new Set());
+  if (!roomUsers.has(room_inviteToken)) {
+    roomUsers.set(room_inviteToken, new Set());
   }
-  roomUsers.get(roomId).add(userId);
 
+  roomUsers.get(room_inviteToken).add(userId);
   userSocketMap.set(userId, socket.id);
 }
 
-// 🔧 Helper: basic filename sanitize
 function isValidFileName(fileName) {
   return !fileName.includes("..");
 }
 
+// =========================
+// 🚀 START SERVER
+// =========================
 const startIoServer = (server) => {
   io = new Server(server, {
     cors: {
@@ -51,6 +53,8 @@ const startIoServer = (server) => {
       credentials: true,
     },
   });
+
+  console.log("Socket.io server started");
 
   io.use(socketAuthMiddleware);
 
@@ -68,9 +72,11 @@ const startIoServer = (server) => {
           return callback({ success: false, message: "Room not found" });
         }
 
-        socket.roomId = inviteToken;
+        // ✅ CLEAN NAMING
+        socket.room_inviteToken = inviteToken; // socket layer
+        socket.room_id = room._id;             // DB layer
 
-        // ✅ Prevent duplicate join
+        // duplicate join
         if (room.users.includes(socket.userId)) {
           socket.join(inviteToken);
           return callback({
@@ -81,7 +87,7 @@ const startIoServer = (server) => {
           });
         }
 
-        // 🟢 OWNER → direct join
+        // OWNER
         if (room.owner.toString() === socket.userId.toString()) {
           socket.join(inviteToken);
           await addUserToRoom(room, socket);
@@ -96,7 +102,7 @@ const startIoServer = (server) => {
           });
         }
 
-        // 🟡 USER → request approval
+        // USER → request
         const ownerSocketId = userSocketMap.get(room.owner.toString());
 
         if (ownerSocketId) {
@@ -133,7 +139,6 @@ const startIoServer = (server) => {
       const room = await Room.findOne({ inviteToken: roomId });
       if (!room) return;
 
-      // 🔐 Only owner allowed
       if (room.owner.toString() !== socket.userId.toString()) return;
 
       const targetSocket = io.sockets.sockets.get(socketId);
@@ -141,17 +146,18 @@ const startIoServer = (server) => {
 
       if (action === "accept") {
         targetSocket.join(roomId);
-        targetSocket.roomId = roomId;
+
+        // ✅ CLEAN NAMING
+        targetSocket.room_inviteToken = roomId;
+        targetSocket.room_id = room._id;
 
         await addUserToRoom(room, targetSocket);
 
-        // notify user
         io.to(socketId).emit("join-approved", {
           roomId,
           roomName: room.roomName,
         });
 
-        // notify others
         targetSocket.to(roomId).emit("user-joined-notification", {
           userId: targetSocket.userId,
           name: targetSocket.userName,
@@ -169,7 +175,7 @@ const startIoServer = (server) => {
     // =========================
     socket.on("get-files", async (_, callback) => {
       try {
-        const containerId = roomContainerMap.get(socket.roomId);
+        const containerId = roomContainerMap.get(socket.room_inviteToken);
         if (!containerId) {
           return callback({ success: false, message: "No container" });
         }
@@ -186,24 +192,24 @@ const startIoServer = (server) => {
     // 4. START TERMINAL
     // =========================
     socket.on("start-terminal", async () => {
-      const roomId = socket.roomId;
-      const containerId = roomContainerMap.get(roomId);
+      const room_inviteToken = socket.room_inviteToken;
+      const containerId = roomContainerMap.get(room_inviteToken);
 
-      if (!containerId || roomShellMap.has(roomId)) return;
+      if (!containerId || roomShellMap.has(room_inviteToken)) return;
 
       const shell = spawn("docker", ["exec", "-i", containerId, "bash"]);
-      roomShellMap.set(roomId, shell);
+      roomShellMap.set(room_inviteToken, shell);
 
       shell.stdout.on("data", (data) => {
-        io.to(roomId).emit("terminal-output", data.toString());
+        io.to(room_inviteToken).emit("terminal-output", data.toString());
       });
 
       shell.stderr.on("data", (data) => {
-        io.to(roomId).emit("terminal-output", data.toString());
+        io.to(room_inviteToken).emit("terminal-output", data.toString());
       });
 
       shell.on("close", () => {
-        roomShellMap.delete(roomId);
+        roomShellMap.delete(room_inviteToken);
       });
     });
 
@@ -211,7 +217,7 @@ const startIoServer = (server) => {
     // 5. TERMINAL INPUT
     // =========================
     socket.on("terminal-input", (data) => {
-      const shell = roomShellMap.get(socket.roomId);
+      const shell = roomShellMap.get(socket.room_inviteToken);
       if (shell?.stdin?.writable) {
         shell.stdin.write(data);
       }
@@ -223,16 +229,16 @@ const startIoServer = (server) => {
     socket.on("read-file", async ({ fileName }, callback) => {
       try {
         if (!isValidFileName(fileName)) {
-          return callback({ success: false, message: "Invalid file name" });
+          return callback({ success: false });
         }
 
-        const containerId = roomContainerMap.get(socket.roomId);
+        const containerId = roomContainerMap.get(socket.room_inviteToken);
         const content = await runDocker(["exec", containerId, "cat", fileName]);
 
         return callback({ success: true, content });
 
       } catch {
-        return callback({ success: false, message: "Read failed" });
+        return callback({ success: false });
       }
     });
 
@@ -242,11 +248,10 @@ const startIoServer = (server) => {
     socket.on("write-file", async ({ fileName, content }, callback) => {
       try {
         if (!isValidFileName(fileName)) {
-          return callback({ success: false, message: "Invalid file name" });
+          return callback({ success: false });
         }
 
-        const containerId = roomContainerMap.get(socket.roomId);
-
+        const containerId = roomContainerMap.get(socket.room_inviteToken);
         const base64Content = Buffer.from(content).toString("base64");
 
         await runDocker([
@@ -260,7 +265,7 @@ const startIoServer = (server) => {
         return callback({ success: true });
 
       } catch {
-        return callback({ success: false, message: "Write failed" });
+        return callback({ success: false });
       }
     });
 
@@ -268,7 +273,7 @@ const startIoServer = (server) => {
     // 8. CODE SYNC
     // =========================
     socket.on("code-change", (data) => {
-      socket.to(socket.roomId).emit("code-change", {
+      socket.to(socket.room_inviteToken).emit("code-change", {
         ...data,
         userId: socket.userId,
         name: socket.userName,
@@ -278,10 +283,10 @@ const startIoServer = (server) => {
     });
 
     // =========================
-    // 9. CURSOR TRACKING
+    // 9. CURSOR
     // =========================
     socket.on("cursor-move", (data) => {
-      socket.to(socket.roomId).emit("cursor-update", {
+      socket.to(socket.room_inviteToken).emit("cursor-update", {
         userId: socket.userId,
         position: data.position,
         color: socket.userColor,
@@ -293,7 +298,10 @@ const startIoServer = (server) => {
     // =========================
     socket.on("send-message", async ({ message }, callback) => {
       try {
-        const roomId = socket.roomId;
+        const room_inviteToken = socket.room_inviteToken;
+        const room_id = socket.room_id;
+
+        if (!room_id) return callback({ success: false });
 
         const payload = {
           userId: socket.userId,
@@ -304,10 +312,10 @@ const startIoServer = (server) => {
           time: new Date(),
         };
 
-        io.to(roomId).emit("receive-message", payload);
+        io.to(room_inviteToken).emit("receive-message", payload);
 
         await Message.create({
-          room_id: roomId,
+          room_id: room_id, // ✅ DB uses _id
           user: socket.userId,
           content: message,
           ok: true,
@@ -325,7 +333,9 @@ const startIoServer = (server) => {
     // =========================
     socket.on("get-messages", async ({ limit = 50 }, callback) => {
       try {
-        const messages = await Message.find({ room_id: socket.roomId })
+        if (!socket.room_id) return callback({ success: false });
+
+        const messages = await Message.find({ room_id: socket.room_id })
           .sort({ createdAt: -1 })
           .limit(limit)
           .populate("user", "name avatar userColor");
@@ -344,22 +354,22 @@ const startIoServer = (server) => {
     // 12. DISCONNECT
     // =========================
     socket.on("disconnect", () => {
-      const roomId = socket.roomId;
+      const room_inviteToken = socket.room_inviteToken;
 
-      const users = roomUsers.get(roomId);
+      const users = roomUsers.get(room_inviteToken);
       if (users) {
         users.delete(socket.userId);
 
-        socket.to(roomId).emit("user-left", {
+        socket.to(room_inviteToken).emit("user-left", {
           userId: socket.userId,
         });
 
         if (users.size === 0) {
-          const shell = roomShellMap.get(roomId);
+          const shell = roomShellMap.get(room_inviteToken);
           if (shell) shell.kill();
 
-          roomShellMap.delete(roomId);
-          roomUsers.delete(roomId);
+          roomShellMap.delete(room_inviteToken);
+          roomUsers.delete(room_inviteToken);
         }
       }
 
@@ -371,10 +381,3 @@ const startIoServer = (server) => {
 };
 
 export { startIoServer };
-
-// Feature,Difficulty,Why it matters
-// Admin Approval,Medium,Keeps the room private and secure.
-// Cursor Tracking,Low,"Makes the app feel ""alive"" and collaborative."
-// xterm.js Integration,High,"Provides a ""real"" Linux terminal experience."
-// Docker Cleanup,Medium,Saves you from massive server bills/crashes.
-

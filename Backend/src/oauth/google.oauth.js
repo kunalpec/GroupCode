@@ -29,6 +29,8 @@ passport.use(
           if (user) {
             // 🔗 link Google account
             user.googleId = googleId;
+            user.isVerified = true; // OAuth users trusted
+            user.oauthImage=oauthImage;
             await user.save({ validateBeforeSave: false });
           }
         }

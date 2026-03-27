@@ -71,7 +71,6 @@ const userSchema = new Schema(
     },
     userColor: {
       type: String,
-      required: true,
     },
   },
   {
