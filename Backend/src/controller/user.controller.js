@@ -294,7 +294,7 @@ const resetPassword = asyncHandler(async (req, res) => {
 
   const user = await User.findOne({
     passwordResetToken: hashedToken,
-    passwordResetExpires: { $gt: Date.now() },
+    passwordResetExpiry: { $gt: Date.now() },
   });
 
   if (!user) throw new ApiError(400, "Invalid or expired token");
@@ -302,7 +302,7 @@ const resetPassword = asyncHandler(async (req, res) => {
   user.password = newPassword;
   user.refreshToken = null;
   user.passwordResetToken = null;
-  user.passwordResetExpires = null;
+  user.passwordResetExpiry = null;
   await user.save();
 
   res.json(new ApiResponse(200, "Password reset successful"));

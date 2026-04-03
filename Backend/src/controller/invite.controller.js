@@ -47,15 +47,15 @@ const sendInvite = asyncHandler(async (req, res) => {
 
   const inviteLink = `${process.env.FRONTEND_URL}/join/${inviteToken}`;
 
-  await mailSender({
-    to: invitedUser.email,
-    subject: "Room Invite",
-    html: `
+  await mailSender(
+    invitedUser.email,
+    "Room Invite",
+    `
       <h3>You are invited to join a room</h3>
       <p>Click below to join:</p>
       <a href="${inviteLink}">${inviteLink}</a>
     `,
-  });
+  );
 
   return res
     .status(200)

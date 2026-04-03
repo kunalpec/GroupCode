@@ -29,12 +29,12 @@ const createUserContainer = asyncHandler(async (req, res) => {
     return res.status(200).json(
       new ApiResponse(
         200,
+        "Container created successfully",
         {
           containerId,
           name: userId,
           volume: volumeName
-        },
-        "Container created successfully"
+        }
       )
     );
   } catch (error) {
@@ -53,8 +53,8 @@ const startUserContainer = asyncHandler(async (req, res) => {
     return res.status(200).json(
       new ApiResponse(
         200,
-        { containerId },
-        "Container started successfully"
+        "Container started successfully",
+        { containerId }
       )
     );
   } catch (error) {
@@ -73,8 +73,8 @@ const stopUserContainer = asyncHandler(async (req, res) => {
     return res.status(200).json(
       new ApiResponse(
         200,
-        { containerId },
-        "Container stopped successfully"
+        "Container stopped successfully",
+        { containerId }
       )
     );
   } catch (error) {
@@ -97,8 +97,8 @@ const getContainerStatus = asyncHandler(async (req, res) => {
     return res.status(200).json(
       new ApiResponse(
         200,
-        { status },
-        "Container status fetched"
+        "Container status fetched",
+        { status }
       )
     );
   } catch (error) {

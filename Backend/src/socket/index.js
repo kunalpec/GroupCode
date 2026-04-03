@@ -19,6 +19,24 @@ export const roomContainerMap = new Map();
 // room_inviteToken → shell process
 const roomShellMap = new Map();
 
+async function getRoomAndContainer(socket, inviteTokenOverride = "") {
+  const resolvedInviteToken = inviteTokenOverride || socket.room_inviteToken;
+  const room = await Room.findOne({ inviteToken: resolvedInviteToken });
+  if (!room) {
+    throw new Error("Room not found");
+  }
+
+  socket.room_inviteToken = resolvedInviteToken;
+  socket.room_id = room._id;
+
+  const containerId = `user_${room.owner}`;
+  roomContainerMap.set(resolvedInviteToken, containerId);
+
+  await runDocker(["start", containerId]).catch(() => {});
+
+  return { room, containerId };
+}
+
 // =========================
 // 🔧 Helper
 // =========================
@@ -40,6 +58,24 @@ async function addUserToRoom(room, socket) {
 
 function isValidFileName(fileName) {
   return !fileName.includes("..");
+}
+
+function shellEscape(value) {
+  return `"${String(value).replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
+function emitWorkspaceUpdate(socket, payload) {
+  if (!socket.room_inviteToken) return;
+
+  io.to(socket.room_inviteToken).emit("workspace-updated", {
+    ...payload,
+    actor: {
+      userId: socket.userId,
+      name: socket.userName,
+      avatar: socket.userAvatar,
+    },
+    time: new Date().toISOString(),
+  });
 }
 
 // =========================
@@ -79,10 +115,12 @@ const startIoServer = (server) => {
         // duplicate join
         if (room.users.includes(socket.userId)) {
           socket.join(inviteToken);
+          await addUserToRoom(room, socket);
           return callback({
             success: true,
             message: "Already in room",
             roomName: room.roomName,
+            path: room.path,
             users: room.users,
           });
         }
@@ -173,41 +211,54 @@ const startIoServer = (server) => {
     // =========================
     socket.on("get-files", async (_, callback) => {
       try {
-        const containerId = roomContainerMap.get(socket.room_inviteToken);
-        if (!containerId) {
-          return callback({ success: false, message: "No container" });
-        }
-
-        const output = await runDocker(["exec", containerId, "ls", "-la"]);
+        const { room, containerId } = await getRoomAndContainer(socket);
+        const output = await runDocker([
+          "exec",
+          containerId,
+          "bash",
+          "-lc",
+          `cd ${shellEscape(room.path)} && ls -la`,
+        ]);
         return callback({ success: true, files: output });
-      } catch {
-        return callback({ success: false, message: "Failed" });
+      } catch (error) {
+        return callback({ success: false, message: error.message || "Failed" });
       }
     });
 
     // =========================
     // 4. START TERMINAL
     // =========================
-    socket.on("start-terminal", async () => {
-      const room_inviteToken = socket.room_inviteToken;
-      const containerId = roomContainerMap.get(room_inviteToken);
+    socket.on("start-terminal", async ({ inviteToken } = {}) => {
+      const room_inviteToken = inviteToken || socket.room_inviteToken;
 
-      if (!containerId || roomShellMap.has(room_inviteToken)) return;
+      if (roomShellMap.has(room_inviteToken)) return;
 
-      const shell = spawn("docker", ["exec", "-i", containerId, "bash"]);
-      roomShellMap.set(room_inviteToken, shell);
+      try {
+        const { room, containerId } = await getRoomAndContainer(socket, room_inviteToken);
+        const shell = spawn("docker", [
+          "exec",
+          "-i",
+          containerId,
+          "bash",
+          "-lc",
+          `cd ${shellEscape(room?.path || "/home/user")} && exec bash`,
+        ]);
+        roomShellMap.set(room_inviteToken, shell);
 
-      shell.stdout.on("data", (data) => {
-        io.to(room_inviteToken).emit("terminal-output", data.toString());
-      });
+        shell.stdout.on("data", (data) => {
+          io.to(room_inviteToken).emit("terminal-output", data.toString());
+        });
 
-      shell.stderr.on("data", (data) => {
-        io.to(room_inviteToken).emit("terminal-output", data.toString());
-      });
+        shell.stderr.on("data", (data) => {
+          io.to(room_inviteToken).emit("terminal-output", data.toString());
+        });
 
-      shell.on("close", () => {
-        roomShellMap.delete(room_inviteToken);
-      });
+        shell.on("close", () => {
+          roomShellMap.delete(room_inviteToken);
+        });
+      } catch (error) {
+        io.to(socket.id).emit("terminal-output", `\r\n[terminal error] ${error.message}\r\n`);
+      }
     });
 
     // =========================
@@ -229,12 +280,12 @@ const startIoServer = (server) => {
           return callback({ success: false });
         }
 
-        const containerId = roomContainerMap.get(socket.room_inviteToken);
+        const { containerId } = await getRoomAndContainer(socket);
         const content = await runDocker(["exec", containerId, "cat", fileName]);
 
         return callback({ success: true, content });
-      } catch {
-        return callback({ success: false });
+      } catch (error) {
+        return callback({ success: false, message: error.message || "Failed to read file" });
       }
     });
 
@@ -247,7 +298,7 @@ const startIoServer = (server) => {
           return callback({ success: false });
         }
 
-        const containerId = roomContainerMap.get(socket.room_inviteToken);
+        const { containerId } = await getRoomAndContainer(socket);
         const base64Content = Buffer.from(content).toString("base64");
 
         await runDocker([
@@ -255,12 +306,117 @@ const startIoServer = (server) => {
           containerId,
           "bash",
           "-c",
-          `echo "${base64Content}" | base64 -d > ${fileName}`,
+          `echo "${base64Content}" | base64 -d > ${shellEscape(fileName)}`,
         ]);
 
         return callback({ success: true });
-      } catch {
-        return callback({ success: false });
+      } catch (error) {
+        return callback({ success: false, message: error.message || "Failed to write file" });
+      }
+    });
+
+    socket.on("create-file", async ({ fileName }, callback) => {
+      try {
+        if (!isValidFileName(fileName)) {
+          return callback({ success: false, message: "Invalid file name" });
+        }
+
+        const { containerId } = await getRoomAndContainer(socket);
+        await runDocker([
+          "exec",
+          containerId,
+          "bash",
+          "-lc",
+          `mkdir -p "$(dirname ${shellEscape(fileName)})" && touch ${shellEscape(fileName)}`,
+        ]);
+
+        emitWorkspaceUpdate(socket, {
+          type: "create-file",
+          path: fileName,
+        });
+
+        return callback({ success: true });
+      } catch (error) {
+        return callback({ success: false, message: error.message || "Failed to create file" });
+      }
+    });
+
+    socket.on("create-folder", async ({ folderName }, callback) => {
+      try {
+        if (!isValidFileName(folderName)) {
+          return callback({ success: false, message: "Invalid folder name" });
+        }
+
+        const { containerId } = await getRoomAndContainer(socket);
+        await runDocker([
+          "exec",
+          containerId,
+          "bash",
+          "-lc",
+          `mkdir -p ${shellEscape(folderName)}`,
+        ]);
+
+        emitWorkspaceUpdate(socket, {
+          type: "create-folder",
+          path: folderName,
+        });
+
+        return callback({ success: true });
+      } catch (error) {
+        return callback({ success: false, message: error.message || "Failed to create folder" });
+      }
+    });
+
+    socket.on("rename-entry", async ({ oldPath, newPath }, callback) => {
+      try {
+        if (!isValidFileName(oldPath) || !isValidFileName(newPath)) {
+          return callback({ success: false, message: "Invalid path" });
+        }
+
+        const { containerId } = await getRoomAndContainer(socket);
+        await runDocker([
+          "exec",
+          containerId,
+          "bash",
+          "-lc",
+          `mkdir -p "$(dirname ${shellEscape(newPath)})" && mv ${shellEscape(oldPath)} ${shellEscape(newPath)}`,
+        ]);
+
+        emitWorkspaceUpdate(socket, {
+          type: "rename-entry",
+          oldPath,
+          newPath,
+        });
+
+        return callback({ success: true });
+      } catch (error) {
+        return callback({ success: false, message: error.message || "Failed to rename entry" });
+      }
+    });
+
+    socket.on("delete-entry", async ({ targetPath }, callback) => {
+      try {
+        if (!isValidFileName(targetPath)) {
+          return callback({ success: false, message: "Invalid path" });
+        }
+
+        const { containerId } = await getRoomAndContainer(socket);
+        await runDocker([
+          "exec",
+          containerId,
+          "bash",
+          "-lc",
+          `rm -rf ${shellEscape(targetPath)}`,
+        ]);
+
+        emitWorkspaceUpdate(socket, {
+          type: "delete-entry",
+          path: targetPath,
+        });
+
+        return callback({ success: true });
+      } catch (error) {
+        return callback({ success: false, message: error.message || "Failed to delete entry" });
       }
     });
 
@@ -332,7 +488,7 @@ const startIoServer = (server) => {
         const messages = await Message.find({ room_id: socket.room_id })
           .sort({ createdAt: -1 })
           .limit(limit)
-          .populate("user", "name avatar userColor");
+          .populate("user", "name avatar oauthImage userColor");
 
         return callback({
           success: true,

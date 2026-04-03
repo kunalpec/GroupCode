@@ -65,8 +65,8 @@ const createNewRoom = asyncHandler(async (req, res) => {
       .json(
         new ApiResponse(
           201,
-          { room, inviteLink: `${process.env.FRONTEND_URL}/join/${uniqueId}` },
           "Room created successfully",
+          { room, inviteLink: `${process.env.FRONTEND_URL}/join/${uniqueId}` },
         ),
       );
   } catch (error) {
@@ -130,8 +130,8 @@ const deleteRoom = asyncHandler(async (req, res) => {
       .json(
         new ApiResponse(
           200,
-          {},
           "Room and container files deleted successfully",
+          {},
         ),
       );
     
@@ -164,25 +164,29 @@ const getRoomDirectory = asyncHandler(async (req, res) => {
     const output = await runDocker([
       "exec",
       containerId,
-      "find",
-      roomPath,
-      "-maxdepth",
-      "3",
-      "-not",
-      "-path",
-      "*/.*",
+      "bash",
+      "-lc",
+      `find "${roomPath}" -maxdepth 3 -not -path '*/.*' -printf '%y|%P\\n'`,
     ]);
 
-    // 3. Process the raw text output from the 'find' command into a clean array.
-    const fileList = output
-      .split("\n") // Split the string into an array of lines.
-      .filter((line) => line.trim() !== "") // Remove any empty lines.
-      .map((line) => line.replace(roomPath, "")); // Make paths relative to the room root for the frontend.
+    // 3. Process the raw text output from the 'find' command into a structured tree list.
+    const entries = output
+      .split("\n")
+      .filter((line) => line.trim() !== "")
+      .map((line) => {
+        const [type, relativePath = ""] = line.split("|");
+        return {
+          path: relativePath ? `/${relativePath}` : "/",
+          type: type === "d" ? "folder" : "file",
+        };
+      });
+
+    const fileList = entries.map((entry) => entry.path);
 
     // 4. Send the file list back to the client.
     return res
       .status(200)
-      .json(new ApiResponse(200, { files: fileList }, "Directory fetched"));
+      .json(new ApiResponse(200, "Directory fetched", { files: fileList, entries }));
   } catch (error) {
     // Handle any errors during the directory reading process.
     throw new ApiError(500, "Failed to read directory");
@@ -197,9 +201,9 @@ const getAllRooms = asyncHandler(async (req, res) => {
 
   return res
     .status(200)
-    .json(new ApiResponse(200, {
+    .json(new ApiResponse(200, "Rooms fetched successfully", {
       rooms,
-    }, "Rooms fetched successfully"));
+    }));
 });
 
 export const roomController = {
