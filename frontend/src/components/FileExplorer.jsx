@@ -1,33 +1,48 @@
 import {
   ChevronDown,
   ChevronRight,
-  FileCode2,
-  FileJson2,
   FilePlus2,
-  FileText,
   Folder,
   FolderOpen,
   FolderPlus,
-  Image as ImageIcon,
   PanelLeftClose,
   Pencil,
   Trash2,
 } from "lucide-react";
+import { FileIcon, defaultStyles } from "react-file-icon";
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 
-function getFileIcon(path) {
+function getFileExtension(path) {
   const lower = path.toLowerCase();
-  if (lower.endsWith(".json")) return <FileJson2 className="h-4 w-4 shrink-0 text-[#f5c542]" />;
-  if (/\.(js|jsx|ts|tsx|py|java|cpp|c|go|rs|sh|html|css)$/.test(lower)) {
-    return <FileCode2 className="h-4 w-4 shrink-0 text-[#75beff]" />;
-  }
-  if (/\.(png|jpg|jpeg|gif|svg|webp)$/.test(lower)) {
-    return <ImageIcon className="h-4 w-4 shrink-0 text-[#c586c0]" />;
-  }
-  return <FileText className="h-4 w-4 shrink-0 text-[#75beff]" />;
+  const fileName = lower.split("/").pop() || "";
+  const parts = fileName.split(".");
+  if (parts.length < 2) return "";
+  return parts.pop() || "";
+}
+
+function getFileIcon(path) {
+  const extension = getFileExtension(path);
+  const iconStyleMap = {
+    css: { ...defaultStyles.css, color: "#264de4", labelColor: "#264de4" },
+    html: { ...defaultStyles.html, color: "#e34f26", labelColor: "#e34f26" },
+    js: { ...defaultStyles.js, color: "#f7df1e", labelColor: "#f7df1e", labelTextColor: "#1e1e1e" },
+    jsx: { ...defaultStyles.jsx, color: "#00d8ff", labelColor: "#00d8ff", labelTextColor: "#1e1e1e" },
+    json: { ...defaultStyles.json, color: "#f5c542", labelColor: "#f5c542", labelTextColor: "#1e1e1e" },
+    py: { ...defaultStyles.py, color: "#3776ab", labelColor: "#ffde57", labelTextColor: "#1e1e1e" },
+    sh: { ...defaultStyles.sh, color: "#89e051", labelColor: "#89e051", labelTextColor: "#1e1e1e" },
+    ts: { ...defaultStyles.ts, color: "#3178c6", labelColor: "#3178c6" },
+    tsx: { ...defaultStyles.tsx, color: "#3178c6", labelColor: "#00d8ff", labelTextColor: "#1e1e1e" },
+  };
+  const iconStyle = iconStyleMap[extension] || defaultStyles[extension] || defaultStyles.txt || {};
+
+  return (
+    <span className="h-[18px] w-[18px] shrink-0 overflow-hidden rounded-[3px]">
+      <FileIcon extension={extension || "file"} {...iconStyle} />
+    </span>
+  );
 }
 
 function buildTree(entries) {

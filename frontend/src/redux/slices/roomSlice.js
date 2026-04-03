@@ -40,6 +40,18 @@ export const getRoomDirectory = createAsyncThunk(
   },
 );
 
+export const deleteRoom = createAsyncThunk(
+  "room/deleteRoom",
+  async (roomId, { rejectWithValue }) => {
+    try {
+      const response = await api.delete(`/api/room/delete/${roomId}`);
+      return { roomId, payload: response.data };
+    } catch (error) {
+      return rejectWithValue(getErrorMessage(error));
+    }
+  },
+);
+
 const roomSlice = createSlice({
   name: "room",
   initialState: {
@@ -88,6 +100,23 @@ const roomSlice = createSlice({
         state.rooms.unshift(action.payload.data.room);
       })
       .addCase(createRoom.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.payload;
+      })
+      .addCase(deleteRoom.pending, (state) => {
+        state.loading = true;
+        state.error = "";
+      })
+      .addCase(deleteRoom.fulfilled, (state, action) => {
+        state.loading = false;
+        state.rooms = state.rooms.filter((room) => room._id !== action.payload.roomId);
+        if (state.currentRoom?._id === action.payload.roomId) {
+          state.currentRoom = null;
+          state.files = [];
+          state.entries = [];
+        }
+      })
+      .addCase(deleteRoom.rejected, (state, action) => {
         state.loading = false;
         state.error = action.payload;
       })

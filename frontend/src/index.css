@@ -5,12 +5,9 @@
 @tailwind utilities;
 
 :root {
-  color: #e2e8f0;
-  background:
-    radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), transparent 30%),
-    radial-gradient(circle at top right, rgba(20, 184, 166, 0.15), transparent 25%),
-    linear-gradient(180deg, #0a0f1b 0%, #08101d 100%);
-  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  color: #cccccc;
+  background: #1e1e1e;
+  font-family: "Segoe UI", "Inter", sans-serif;
 }
 
 * {
@@ -26,6 +23,8 @@ body,
 
 body {
   min-height: 100vh;
+  background: #1e1e1e;
+  color: #cccccc;
 }
 
 button,
