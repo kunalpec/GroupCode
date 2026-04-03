@@ -17,6 +17,7 @@ app.use(
   cors({
     origin: process.env.CORS_ORIGIN || process.env.FRONTEND_URL,
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
   })
 );
 
@@ -34,7 +35,7 @@ const globalLimiter = rateLimit({
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
-app.use(globalLimiter);
+// app.use(globalLimiter);
 
 // Apply to all requests
 // app.use(globalLimiter);

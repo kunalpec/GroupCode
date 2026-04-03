@@ -4,7 +4,7 @@ import {upload} from "../middleware/multer.middleware.js";
 import express,{ Router } from "express";
 import { rateLimit } from 'express-rate-limit';
 
-const route = Router();
+const router = Router();
 // 🚫 Strict Limiter for sensitive routes
 export const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
@@ -17,17 +17,19 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-route.post("/login", userController.login);
-route.post("/signup", authLimiter,userController.signup);
-route.post("/send-otp", userController.sendOTP);
-route.post("/verify-otp", userController.verifyOTP);
+router.post("/login", userController.login);
+router.post("/signup",userController.signup);
+router.post("/send-otp", userController.sendOTP);
+router.post("/verify-otp", userController.verifyOTP);
 
-route.post("/logout", verifyJWT, userController.logout);
-route.get("/refresh-token", userController.refreshAccessToken);
+router.post("/logout", verifyJWT, userController.logout);
+router.get("/refresh-token", userController.refreshAccessToken);
 
-route.post("/upload-avatar", verifyJWT, upload.single("avatar"), userController.uploadAvatar);
+router.post("/upload-avatar", verifyJWT, upload.single("avatar"), userController.uploadAvatar);
 
-route.post("/forget-password", userController.forgetPassword);
-route.post("/reset-password/:token", userController.resetPassword);
+router.post("/forget-password", userController.forgetPassword);
+router.post("/reset-password/:token", userController.resetPassword);
 
-export default route;
+// GET /api/user/me
+router.get("/me", verifyJWT, userController.getCurrentUser);
+export default router;

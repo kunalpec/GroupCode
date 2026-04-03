@@ -7,12 +7,7 @@ import { ApiResponse } from "../util/ApiResponse.util.js";
 import { asyncHandler } from "../util/asyncHandler.util.js";
 import { uploadOnCloudinary, deletefile } from "../util/cloudinary.util.js";
 import { mailSender } from "../util/mailSender.util.js";
-
-const cookieOptions = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-};
+import { cookieOptions } from "../util/cookieOptions.js";
 
 const generateTokens = async (user) => {
   if (!user) throw new ApiError(404, "User not found");
@@ -77,14 +72,18 @@ const login = asyncHandler(async (req, res) => {
   const user = await User.findOne({ email });
   // FIX: Check if user exists BEFORE checking verification status
   if (!user) throw new ApiError(404, "User not found");
-  
-  if (user.isVerified === false) throw new ApiError(401, "User not verified. Please verify your email first.");
+
+  if (user.isVerified === false)
+    throw new ApiError(
+      401,
+      "User not verified. Please verify your email first.",
+    );
 
   const isMatch = await user.isPasswordCorrect(password);
   if (!isMatch) throw new ApiError(400, "Invalid credentials");
 
   const { accessToken, refreshToken } = await generateTokens(user);
-  
+
   res.cookie("refreshToken", refreshToken, cookieOptions);
   res.cookie("accessToken", accessToken, cookieOptions);
 
@@ -96,6 +95,8 @@ const login = asyncHandler(async (req, res) => {
       avatar: user.avatar,
       isVerified: user.isVerified,
       oauthImage: user.oauthImage,
+      containerId: user.containerId,
+      userColor: user.userColor,
     }),
   );
 });
@@ -108,14 +109,19 @@ const signup = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Passwords do not match");
 
   const userExists = await User.findOne({ email });
-  
+
   if (userExists) {
     if (userExists.isVerified === true) {
       throw new ApiError(400, "User already exists and is verified");
     } else {
       // FIX: Added response message here so the request doesn't hang
       await generateAndSendOTP(email);
-      return res.json(new ApiResponse(200, "User already exists but not verified. A new OTP has been sent to your email."));
+      return res.json(
+        new ApiResponse(
+          200,
+          "User already exists but not verified. A new OTP has been sent to your email.",
+        ),
+      );
     }
   }
 
@@ -128,14 +134,20 @@ const signup = asyncHandler(async (req, res) => {
   await generateAndSendOTP(email);
 
   res.status(201).json(
-    new ApiResponse(201, "User created successfully. Verify OTP sent to Email", {
-      _id: user._id,
-      name: user.name,
-      email: user.email,
-      avatar: user.avatar,
-      isVerified: user.isVerified,
-      oauthImage: user.oauthImage,
-    }),
+    new ApiResponse(
+      201,
+      "User created successfully. Verify OTP sent to Email",
+      {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        avatar: user.avatar,
+        isVerified: user.isVerified,
+        oauthImage: user.oauthImage,
+        containerId: user.containerId,
+        userColor: user.userColor,
+      },
+    ),
   );
 });
 
@@ -169,14 +181,18 @@ const verifyOTP = asyncHandler(async (req, res) => {
   res.cookie("refreshToken", refreshToken, cookieOptions);
   res.cookie("accessToken", accessToken, cookieOptions);
 
-  res.json(new ApiResponse(200, "OTP verified successfully and logged in", {
-    _id: user._id,
-    name: user.name,
-    email: user.email,
-    avatar: user.avatar,
-    isVerified: user.isVerified,
-    oauthImage: user.oauthImage,
-  }));
+  res.json(
+    new ApiResponse(200, "OTP verified successfully and logged in", {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar,
+      isVerified: user.isVerified,
+      oauthImage: user.oauthImage,
+      containerId: user.containerId,
+      userColor: user.userColor,
+    }),
+  );
 });
 
 const logout = asyncHandler(async (req, res) => {
@@ -292,14 +308,35 @@ const resetPassword = asyncHandler(async (req, res) => {
   res.json(new ApiResponse(200, "Password reset successful"));
 });
 
+const getCurrentUser = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id).select(
+    "-password -refreshToken",
+  );
+  if (!user) throw new ApiError(404, "User not found");
+
+  res.json(
+    new ApiResponse(200, "User fetched successfully", {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      avatar: user.avatar,
+      isVerified: user.isVerified,
+      oauthImage: user.oauthImage,
+      containerId: user.containerId,
+      userColor: user.userColor,
+    }),
+  );
+});
+
 export const userController = {
   login,
   signup,
   sendOTP,
   verifyOTP,
-  logout,
   refreshAccessToken,
+  logout,
   uploadAvatar,
   forgetPassword,
   resetPassword,
+  getCurrentUser,
 };

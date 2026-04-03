@@ -74,7 +74,7 @@ const startIoServer = (server) => {
 
         // ✅ CLEAN NAMING
         socket.room_inviteToken = inviteToken; // socket layer
-        socket.room_id = room._id;             // DB layer
+        socket.room_id = room._id; // DB layer
 
         // duplicate join
         if (room.users.includes(socket.userId)) {
@@ -125,7 +125,6 @@ const startIoServer = (server) => {
           success: false,
           message: "Owner not online",
         });
-
       } catch (err) {
         console.error("Join Room Error:", err);
         return callback({ success: false, message: "Server error" });
@@ -164,7 +163,6 @@ const startIoServer = (server) => {
           avatar: targetSocket.userAvatar,
           userColor: targetSocket.userColor,
         });
-
       } else {
         io.to(socketId).emit("join-rejected");
       }
@@ -182,7 +180,6 @@ const startIoServer = (server) => {
 
         const output = await runDocker(["exec", containerId, "ls", "-la"]);
         return callback({ success: true, files: output });
-
       } catch {
         return callback({ success: false, message: "Failed" });
       }
@@ -236,7 +233,6 @@ const startIoServer = (server) => {
         const content = await runDocker(["exec", containerId, "cat", fileName]);
 
         return callback({ success: true, content });
-
       } catch {
         return callback({ success: false });
       }
@@ -263,7 +259,6 @@ const startIoServer = (server) => {
         ]);
 
         return callback({ success: true });
-
       } catch {
         return callback({ success: false });
       }
@@ -322,7 +317,6 @@ const startIoServer = (server) => {
         });
 
         return callback({ success: true });
-
       } catch {
         return callback({ success: false });
       }
@@ -344,10 +338,26 @@ const startIoServer = (server) => {
           success: true,
           messages: messages.reverse(),
         });
-
       } catch {
         return callback({ success: false });
       }
+    });
+
+    // =========================
+    // 13. TYPING
+    // =========================
+    socket.on("typing", () => {
+      socket.to(socket.room_inviteToken).emit("typing", {
+        userId: socket.userId,
+        name: socket.userName,
+        avatar: socket.userAvatar,
+      });
+    });
+
+    socket.on("stop-typing", () => {
+      socket.to(socket.room_inviteToken).emit("stop-typing", {
+        userId: socket.userId,
+      });
     });
 
     // =========================

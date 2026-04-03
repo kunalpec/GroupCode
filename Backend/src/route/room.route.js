@@ -7,5 +7,6 @@ const router = Router();
 router.post("/create", verifyJWT, roomController.createNewRoom);
 router.delete("/delete/:roomId", verifyJWT, roomController.deleteRoom);
 router.get("/directory/:roomId", verifyJWT, roomController.getRoomDirectory);
+router.get("/all", verifyJWT, roomController.getAllRooms);
 
 export default router;

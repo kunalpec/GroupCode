@@ -188,8 +188,23 @@ const getRoomDirectory = asyncHandler(async (req, res) => {
     throw new ApiError(500, "Failed to read directory");
   }
 });
+
+const getAllRooms = asyncHandler(async (req, res) => {
+  const user = req.user;
+  if (!user) throw new ApiError(404, "User not found");
+
+  const rooms = await Room.find({ users: user._id });
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, {
+      rooms,
+    }, "Rooms fetched successfully"));
+});
+
 export const roomController = {
   createNewRoom,
   deleteRoom,
   getRoomDirectory,
+  getAllRooms
 };

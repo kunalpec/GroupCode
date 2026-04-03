@@ -1,14 +1,7 @@
 import express, { Router } from "express";
 import passport from "passport";
-import { ApiResponse } from "../util/ApiResponse.util.js";
+import { cookieOptions } from "../util/cookieOptions.js";
 const router = Router();
-
-// ======= Helper function =======
-const cookieOptions = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-};
 
 const handleOAuthCallback = async (req, res) => {
   try {
@@ -44,7 +37,7 @@ router.get(
     failureRedirect: `${process.env.FRONTEND_URL}/login`,
     session: false, // 🔥 IMPORTANT
   }),
-  handleOAuthCallback
+  handleOAuthCallback,
 );
 
 // ================= GITHUB =================
@@ -62,8 +55,7 @@ router.get(
     failureRedirect: `${process.env.FRONTEND_URL}/login`,
     session: false, // 🔥 IMPORTANT
   }),
-  handleOAuthCallback
+  handleOAuthCallback,
 );
-
 
 export default router;
