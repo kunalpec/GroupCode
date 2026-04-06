@@ -48,6 +48,26 @@ function toRelativeWorkspacePath(roomPath, absolutePath) {
   return relativePath.startsWith("/") ? relativePath : `/${relativePath}`;
 }
 
+function createTerminalSession(index) {
+  return {
+    id: `terminal-${index}`,
+    label: `Terminal ${index}`,
+    buffer: "",
+  };
+}
+
+function getRunCommand(filePath) {
+  const normalizedPath = filePath.replace(/^\/+/, "");
+  const escapedPath = normalizedPath.replace(/"/g, '\\"');
+  const extension = normalizedPath.split(".").pop()?.toLowerCase();
+
+  if (extension === "py") return `python3 "./${escapedPath}"\r`;
+  if (extension === "js") return `node "./${escapedPath}"\r`;
+  if (extension === "sh") return `bash "./${escapedPath}"\r`;
+
+  return "";
+}
+
 function Room() {
   const { inviteToken } = useParams();
   const dispatch = useDispatch();
@@ -64,6 +84,8 @@ function Room() {
   const [isRightPanelVisible, setIsRightPanelVisible] = useState(true);
   const [isTerminalVisible, setIsTerminalVisible] = useState(true);
   const [isTerminalExpanded, setIsTerminalExpanded] = useState(false);
+  const [terminalSessions, setTerminalSessions] = useState([createTerminalSession(1)]);
+  const [activeTerminalId, setActiveTerminalId] = useState("terminal-1");
   const [collaborators, setCollaborators] = useState([]);
   const [isReady, setIsReady] = useState(false);
   const [creatingEntry, setCreatingEntry] = useState(false);
@@ -95,6 +117,8 @@ function Room() {
     setEditorContent("");
     setIsReady(false);
     setCollaborators([]);
+    setTerminalSessions([createTerminalSession(1)]);
+    setActiveTerminalId("terminal-1");
     dispatch(resetRoomWorkspace());
     dispatch(setRoomUsers([]));
   }, [dispatch, inviteToken]);
@@ -178,6 +202,29 @@ function Room() {
       dispatch(setJoinState({ state: "rejected", message: "The owner rejected your request." }));
       dispatch(setRoomUsers([]));
     };
+    const onTerminalOutput = (payload) => {
+      if (!payload?.terminalId) return;
+
+      setTerminalSessions((current) => {
+        const existing = current.find((session) => session.id === payload.terminalId);
+        if (!existing) {
+          return [
+            ...current,
+            {
+              id: payload.terminalId,
+              label: payload.terminalId.replace("-", " "),
+              buffer: payload.data || "",
+            },
+          ];
+        }
+
+        return current.map((session) =>
+          session.id === payload.terminalId
+            ? { ...session, buffer: `${session.buffer}${payload.data || ""}` }
+            : session,
+        );
+      });
+    };
     const onMessage = (payload) => dispatch(addMessage(payload));
     const onTyping = (payload) => dispatch(setTypingUser(payload));
     const onStopTyping = (payload) => dispatch(clearTypingUser(payload.userId));
@@ -241,6 +288,7 @@ function Room() {
     socket.on("join-request", onJoinRequest);
     socket.on("join-approved", onJoinApproved);
     socket.on("join-rejected", onJoinRejected);
+    socket.on("terminal-output", onTerminalOutput);
     socket.on("receive-message", onMessage);
     socket.on("typing", onTyping);
     socket.on("stop-typing", onStopTyping);
@@ -262,6 +310,7 @@ function Room() {
       socket.off("join-request", onJoinRequest);
       socket.off("join-approved", onJoinApproved);
       socket.off("join-rejected", onJoinRejected);
+      socket.off("terminal-output", onTerminalOutput);
       socket.off("receive-message", onMessage);
       socket.off("typing", onTyping);
       socket.off("stop-typing", onStopTyping);
@@ -288,25 +337,29 @@ function Room() {
   }, [isReady, room?.path, selectedFile]);
 
   const handleSave = () => {
-    if (!selectedFile || !room?.path) return;
+    if (!selectedFile || !room?.path) return Promise.resolve(false);
 
-    ensureRoomSocket()
+    return ensureRoomSocket()
       .then((socket) => {
-        socket.emit(
-          "write-file",
-          { fileName: `${room.path}${selectedFile}`, content: editorContent },
-          (response) => {
-            if (response?.success) {
-              toast({ title: "File saved", description: selectedFile.replace(/^\//, "") });
-            } else {
-              toast({
-                title: "Save failed",
-                description: "The backend rejected the write request.",
-                variant: "destructive",
-              });
-            }
-          },
-        );
+        return new Promise((resolve) => {
+          socket.emit(
+            "write-file",
+            { fileName: `${room.path}${selectedFile}`, content: editorContent },
+            (response) => {
+              if (response?.success) {
+                toast({ title: "File saved", description: selectedFile.replace(/^\//, "") });
+                resolve(true);
+              } else {
+                toast({
+                  title: "Save failed",
+                  description: "The backend rejected the write request.",
+                  variant: "destructive",
+                });
+                resolve(false);
+              }
+            },
+          );
+        });
       })
       .catch(() => {
         toast({
@@ -314,6 +367,7 @@ function Room() {
           description: "Reconnect to use editor, terminal, and chat.",
           variant: "destructive",
         });
+        return false;
       });
   };
 
@@ -378,6 +432,63 @@ function Room() {
     const inviteUrl = `${window.location.origin}/join/${inviteToken}`;
     await navigator.clipboard.writeText(inviteUrl);
     toast({ title: "Invite copied", description: inviteUrl });
+  };
+
+  const handleCreateTerminalSession = () => {
+    setTerminalSessions((current) => {
+      const nextIndex = current.length + 1;
+      const nextSession = createTerminalSession(nextIndex);
+      setActiveTerminalId(nextSession.id);
+      setIsTerminalVisible(true);
+      setActiveTab("terminal");
+      return [...current, nextSession];
+    });
+  };
+
+  const handleClearTerminalSession = (terminalId) => {
+    setTerminalSessions((current) =>
+      current.map((session) => (session.id === terminalId ? { ...session, buffer: "" } : session)),
+    );
+  };
+
+  const handleRunFile = async (terminalId) => {
+    if (!selectedFile) {
+      toast({
+        title: "No file selected",
+        description: "Choose a file before running it.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const command = getRunCommand(selectedFile);
+    if (!command) {
+      toast({
+        title: "Run not supported",
+        description: "Use a .py, .js, or .sh file for quick run.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const saved = await handleSave();
+    if (!saved) return;
+
+    try {
+      const socket = await ensureRoomSocket();
+      socket.emit("start-terminal", { inviteToken, terminalId });
+      socket.emit("terminal-input", { terminalId, data: command });
+      setIsTerminalVisible(true);
+      setIsTerminalExpanded(true);
+      setActiveTab("terminal");
+      setActiveTerminalId(terminalId);
+    } catch {
+      toast({
+        title: "Terminal unavailable",
+        description: "Reconnect before running your file.",
+        variant: "destructive",
+      });
+    }
   };
 
   const refreshDirectory = async () => {
@@ -824,13 +935,20 @@ function Room() {
                   <TabsContent className="min-h-0 flex-1 overflow-hidden" value="terminal">
                     <TerminalPane
                       active={activeTab === "terminal"}
+                      activeSessionId={activeTerminalId}
+                      canRunFile={Boolean(selectedFile)}
                       inviteToken={inviteToken}
+                      onActiveSessionChange={setActiveTerminalId}
+                      onClearSession={handleClearTerminalSession}
+                      onCreateSession={handleCreateTerminalSession}
                       onHide={() => {
                         setIsTerminalExpanded(false);
                         setIsTerminalVisible(false);
                       }}
+                      onRunFile={handleRunFile}
                       onTerminalActivity={scheduleDirectoryRefresh}
                       ready={isReady}
+                      sessions={terminalSessions}
                       socket={getSocket()}
                     />
                   </TabsContent>

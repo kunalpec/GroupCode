@@ -84,6 +84,20 @@ function emitRoomPresence(room_inviteToken) {
   });
 }
 
+function getTerminalSessionKey(socketId, terminalId = "terminal-1") {
+  return `${socketId}:${terminalId}`;
+}
+
+function closeSocketTerminals(socket) {
+  const prefix = `${socket.id}:`;
+
+  for (const [key, shell] of roomShellMap.entries()) {
+    if (!key.startsWith(prefix)) continue;
+    shell.kill();
+    roomShellMap.delete(key);
+  }
+}
+
 async function addUserToRoom(room, socket) {
   const { userId, room_inviteToken } = socket;
 
@@ -301,9 +315,9 @@ const startIoServer = (server) => {
     // =========================
     // 4. START TERMINAL
     // =========================
-    socket.on("start-terminal", async ({ inviteToken } = {}) => {
+    socket.on("start-terminal", async ({ inviteToken, terminalId = "terminal-1" } = {}) => {
       const room_inviteToken = inviteToken || socket.room_inviteToken;
-      const shellKey = socket.id;
+      const shellKey = getTerminalSessionKey(socket.id, terminalId);
 
       if (roomShellMap.has(shellKey)) return;
 
@@ -326,27 +340,30 @@ const startIoServer = (server) => {
         roomShellMap.set(shellKey, shell);
 
         shell.stdout.on("data", (data) => {
-          io.to(socket.id).emit("terminal-output", data.toString());
+          io.to(socket.id).emit("terminal-output", { terminalId, data: data.toString() });
         });
 
         shell.stderr.on("data", (data) => {
-          io.to(socket.id).emit("terminal-output", data.toString());
+          io.to(socket.id).emit("terminal-output", { terminalId, data: data.toString() });
         });
 
         shell.on("close", () => {
           roomShellMap.delete(shellKey);
-          io.to(socket.id).emit("terminal-output", "\r\n[terminal closed]\r\n");
+          io.to(socket.id).emit("terminal-output", { terminalId, data: "\r\n[terminal closed]\r\n" });
         });
       } catch (error) {
-        io.to(socket.id).emit("terminal-output", `\r\n[terminal error] ${error.message}\r\n`);
+        io.to(socket.id).emit("terminal-output", {
+          terminalId,
+          data: `\r\n[terminal error] ${error.message}\r\n`,
+        });
       }
     });
 
     // =========================
     // 5. TERMINAL INPUT
     // =========================
-    socket.on("terminal-input", (data) => {
-      const shell = roomShellMap.get(socket.id);
+    socket.on("terminal-input", ({ terminalId = "terminal-1", data } = {}) => {
+      const shell = roomShellMap.get(getTerminalSessionKey(socket.id, terminalId));
       if (shell?.stdin?.writable) {
         shell.stdin.write(data);
       }
@@ -602,12 +619,7 @@ const startIoServer = (server) => {
     // =========================
     socket.on("disconnect", () => {
       const room_inviteToken = socket.room_inviteToken;
-      const shell = roomShellMap.get(socket.id);
-
-      if (shell) {
-        shell.kill();
-        roomShellMap.delete(socket.id);
-      }
+      closeSocketTerminals(socket);
 
       const userRemoved = removeUserFromRoom(socket);
       if (userRemoved) {

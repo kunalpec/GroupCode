@@ -66,3 +66,20 @@ a {
   height: 0;
   display: none;
 }
+
+.terminal-shell {
+  background: #181818;
+}
+
+.terminal-shell .xterm {
+  height: 100%;
+  padding: 10px 12px;
+}
+
+.terminal-shell .xterm-viewport {
+  background: #181818 !important;
+}
+
+.terminal-shell .xterm-screen {
+  width: 100% !important;
+}
