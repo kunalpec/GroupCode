@@ -29,6 +29,7 @@ function TerminalPane({
   const renderedSessionIdRef = useRef("");
   const renderedBufferRef = useRef("");
   const pendingLineRef = useRef({});
+  const submittedLineRef = useRef({});
   const activeSession = sessions.find((session) => session.id === activeSessionId) || sessions[0] || null;
 
   useEffect(() => {
@@ -92,6 +93,7 @@ function TerminalPane({
       if (data === "\r") {
         terminal.write("\r\n");
         renderedBufferRef.current = `${renderedBufferRef.current}${currentLine}\r\n`;
+        submittedLineRef.current[terminalId] = currentLine;
         socketRef.current.emit("terminal-input", { terminalId, data: `${currentLine}\n` });
         pendingLineRef.current[terminalId] = "";
         onTerminalActivityRef.current?.();
@@ -169,14 +171,31 @@ function TerminalPane({
         return;
       }
 
-      const originalData = payload.data || "";
+      const terminalId = payload.terminalId;
+      const echoedLine = submittedLineRef.current[terminalId] || "";
+      let originalData = payload.data || "";
+
+      if (echoedLine) {
+        const normalizedEcho = echoedLine.replace(/\r/g, "");
+        if (originalData.startsWith(`${normalizedEcho}\r\n`)) {
+          originalData = originalData.slice(normalizedEcho.length + 2);
+          submittedLineRef.current[terminalId] = "";
+        } else if (originalData.startsWith(`${normalizedEcho}\n`)) {
+          originalData = originalData.slice(normalizedEcho.length + 1);
+          submittedLineRef.current[terminalId] = "";
+        } else if (originalData === normalizedEcho) {
+          originalData = "";
+          submittedLineRef.current[terminalId] = "";
+        }
+      }
+
       if (originalData) {
         terminalRef.current?.write(originalData);
         terminalRef.current?.scrollToBottom();
         terminalRef.current?.refresh(0, terminalRef.current.rows - 1);
       }
 
-      renderedSessionIdRef.current = payload.terminalId;
+      renderedSessionIdRef.current = terminalId;
       renderedBufferRef.current = `${renderedBufferRef.current}${originalData}`;
     };
 
