@@ -75,6 +75,7 @@ function TerminalPane({
 
       if (data === "\r") {
         terminal.write("\r\n");
+        renderedBufferRef.current = `${renderedBufferRef.current}${currentLine}\r\n`;
         socket?.emit("terminal-input", { terminalId, data: `${currentLine}\n` });
         pendingLineRef.current[terminalId] = "";
         onTerminalActivity?.();
@@ -115,16 +116,18 @@ function TerminalPane({
     const nextBuffer = activeSession?.buffer || "";
     const terminal = terminalRef.current;
 
-    if (renderedSessionIdRef.current !== nextSessionId || renderedBufferRef.current === "") {
+    // Rehydrate only when switching sessions or first attaching the terminal.
+    // Do not reset on every buffer update, otherwise xterm appears to go blank.
+    if (renderedSessionIdRef.current !== nextSessionId) {
       terminal.reset();
       terminal.write(nextBuffer);
       renderedSessionIdRef.current = nextSessionId;
       renderedBufferRef.current = nextBuffer;
       terminal.write(pendingLineRef.current[nextSessionId] || "");
-    } else if (!nextBuffer && renderedBufferRef.current) {
-      terminal.reset();
-      renderedBufferRef.current = "";
-      terminal.write(pendingLineRef.current[nextSessionId] || "");
+    } else if (!renderedSessionIdRef.current) {
+      terminal.write(nextBuffer);
+      renderedSessionIdRef.current = nextSessionId;
+      renderedBufferRef.current = nextBuffer;
     }
 
     fitAddonRef.current?.fit();
@@ -153,6 +156,8 @@ function TerminalPane({
       const originalData = payload.data || "";
       if (originalData) {
         terminalRef.current?.write(originalData);
+        terminalRef.current?.scrollToBottom();
+        terminalRef.current?.refresh(0, terminalRef.current.rows - 1);
       }
 
       renderedSessionIdRef.current = payload.terminalId;
