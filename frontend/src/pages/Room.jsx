@@ -94,7 +94,7 @@ function Room() {
   const { inviteToken } = useParams();
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const { accessToken, isAuthenticated } = useSelector((state) => state.auth);
+  const { accessToken, isAuthenticated, user } = useSelector((state) => state.auth);
   const { rooms, currentRoom, entries } = useSelector((state) => state.room);
   const { status, approvalRequests, joinState, joinMessage, roomUsers } = useSelector((state) => state.socket);
   const { messages, typingUsers } = useSelector((state) => state.chat);
@@ -113,19 +113,29 @@ function Room() {
   const [creatingEntry, setCreatingEntry] = useState(false);
   const syncGuardRef = useRef(false);
   const editorRef = useRef(null);
+  const selectedFileRef = useRef("");
   const refreshTimerRef = useRef(null);
+  const refreshFollowUpTimerRef = useRef(null);
 
   const room = useMemo(
     () => currentRoom || rooms.find((item) => item.inviteToken === inviteToken) || null,
     [currentRoom, inviteToken, rooms],
   );
   const roomUserMap = useMemo(() => new Map(roomUsers.map((member) => [member.userId, member])), [roomUsers]);
+  const currentUserId = user?._id || "";
+
+  useEffect(() => {
+    selectedFileRef.current = selectedFile;
+  }, [selectedFile]);
 
   useEffect(() => {
     dispatch(getRooms());
     return () => {
       if (refreshTimerRef.current) {
         window.clearTimeout(refreshTimerRef.current);
+      }
+      if (refreshFollowUpTimerRef.current) {
+        window.clearTimeout(refreshFollowUpTimerRef.current);
       }
       dispatch(resetRoomWorkspace());
       dispatch(resetChat());
@@ -228,6 +238,8 @@ function Room() {
     const onTerminalOutput = (payload) => {
       if (!payload?.terminalId) return;
 
+      scheduleDirectoryRefresh();
+
       setTerminalSessions((current) => {
         const existing = current.find((session) => session.id === payload.terminalId);
         if (!existing) {
@@ -251,8 +263,20 @@ function Room() {
     const onMessage = (payload) => dispatch(addMessage(payload));
     const onTyping = (payload) => dispatch(setTypingUser(payload));
     const onStopTyping = (payload) => dispatch(clearTypingUser(payload.userId));
-    const onRoomUsers = (payload) => dispatch(setRoomUsers(payload?.users || []));
+    const onRoomUsers = (payload) => {
+      const users = payload?.users || [];
+      dispatch(setRoomUsers(users));
+      setCollaborators((current) =>
+        current.filter(
+          (entry) => entry.userId !== currentUserId && users.some((member) => member.userId === entry.userId),
+        ),
+      );
+    };
     const onCursorUpdate = (payload) => {
+      if (!payload?.userId || payload.userId === currentUserId) {
+        return;
+      }
+
       setCollaborators((current) => {
         const next = current.filter((entry) => entry.userId !== payload.userId);
         return [...next, payload];
@@ -269,8 +293,27 @@ function Room() {
     };
     const onCodeChange = (payload) => {
       if (payload.fileName !== selectedFile) return;
+
+      const editor = editorRef.current;
+      const selection = editor?.getSelection() || null;
+      const position = editor?.getPosition() || null;
+      const viewState = editor?.saveViewState?.() || null;
+
       syncGuardRef.current = true;
       setEditorContent(payload.content || "");
+
+      if (editor) {
+        window.requestAnimationFrame(() => {
+          if (viewState) {
+            editor.restoreViewState(viewState);
+          }
+          if (selection) {
+            editor.setSelection(selection);
+          } else if (position) {
+            editor.setPosition(position);
+          }
+        });
+      }
     };
     const onUserJoinedNotification = (payload) => {
       toast({
@@ -344,7 +387,7 @@ function Room() {
       socket.off("user-joined-notification", onUserJoinedNotification);
       socket.off("workspace-updated", onWorkspaceUpdated);
     };
-  }, [accessToken, dispatch, inviteToken, isAuthenticated, room?._id, room?.path, selectedFile]);
+  }, [accessToken, currentUserId, dispatch, inviteToken, isAuthenticated, room?._id, room?.path, selectedFile]);
 
   useEffect(() => {
     if (!selectedFile || !isReady || !room?.path) {
@@ -412,8 +455,9 @@ function Room() {
 
   const handleCursorChange = () => {
     const position = editorRef.current?.getPosition();
-    if (!position) return;
-    getSocket()?.emit("cursor-move", { position });
+    const activeFile = selectedFileRef.current;
+    if (!position || !activeFile) return;
+    getSocket()?.emit("cursor-move", { position, fileName: activeFile });
   };
 
   const handleApprovalDecision = (request, action) => {
@@ -595,10 +639,21 @@ function Room() {
     if (refreshTimerRef.current) {
       window.clearTimeout(refreshTimerRef.current);
     }
+    if (refreshFollowUpTimerRef.current) {
+      window.clearTimeout(refreshFollowUpTimerRef.current);
+    }
+
     refreshTimerRef.current = window.setTimeout(() => {
       dispatch(getRoomDirectory(room._id));
       refreshTimerRef.current = null;
-    }, 500);
+    }, 450);
+
+    // Commands executed in the terminal can finish after the first refresh.
+    // Run one more delayed sync so mkdir/npm-generated files show up reliably.
+    refreshFollowUpTimerRef.current = window.setTimeout(() => {
+      dispatch(getRoomDirectory(room._id));
+      refreshFollowUpTimerRef.current = null;
+    }, 1800);
   };
 
   const handleCreateFile = async (relativePath) => {
@@ -802,11 +857,14 @@ function Room() {
 
   if (joinState === "failed" || joinState === "rejected") {
     return (
-      <div className="flex min-h-screen items-center justify-center px-6">
-        <div className="max-w-md rounded-3xl border border-slate-800 bg-slate-950/70 p-8 text-center">
+      <div className="flex min-h-screen items-center justify-center bg-[#1e1e1e] px-6">
+        <div className="max-w-md rounded-md border border-[#2d2d30] bg-[#252526] p-8 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
           <h1 className="text-2xl font-bold text-white">Room unavailable</h1>
-          <p className="mt-3 text-sm text-slate-400">{joinMessage}</p>
-          <Button className="mt-6" onClick={() => navigate("/dashboard")}>
+          <p className="mt-3 text-sm text-[#9da1a6]">{joinMessage}</p>
+          <Button
+            className="mt-6 border border-[#0e639c] bg-[#0e639c] text-white hover:bg-[#1177bb]"
+            onClick={() => navigate("/dashboard")}
+          >
             Back to dashboard
           </Button>
         </div>
@@ -865,11 +923,11 @@ function Room() {
       </header>
 
       {joinState === "pending" ? (
-        <div className="flex items-center justify-center px-6">
-          <div className="max-w-xl rounded-3xl border border-slate-800 bg-slate-950/70 p-8 text-center">
-            <BellRing className="mx-auto h-10 w-10 text-cyan-300" />
+        <div className="flex items-center justify-center bg-[#1e1e1e] px-6">
+          <div className="max-w-xl rounded-md border border-[#2d2d30] bg-[#252526] p-8 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+            <BellRing className="mx-auto h-10 w-10 text-[#4fc1ff]" />
             <h2 className="mt-4 text-2xl font-bold text-white">Waiting for approval</h2>
-            <p className="mt-3 text-sm leading-6 text-slate-400">
+            <p className="mt-3 text-sm leading-6 text-[#9da1a6]">
               {joinMessage || "The room owner needs to approve your request before you can enter."}
             </p>
           </div>
@@ -989,6 +1047,7 @@ function Room() {
                             const profileColor = member?.userColor || collaborator.color || "#38bdf8";
                             const avatar = member?.avatar || collaborator.avatar || "";
                             const lineNumber = collaborator.position?.lineNumber || 1;
+                            const activeFilePath = collaborator.fileName || "Unknown file";
 
                             return (
                               <div
@@ -1013,6 +1072,7 @@ function Room() {
                                     />
                                   </div>
                                   <p className="truncate text-xs text-[#c7d2da]">Writing at line {lineNumber}</p>
+                                  <p className="truncate text-[11px] text-[#9dc2d8]">{activeFilePath}</p>
                                 </div>
                               </div>
                             );

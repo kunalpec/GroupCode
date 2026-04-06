@@ -538,6 +538,7 @@ const startIoServer = (server) => {
       socket.to(socket.room_inviteToken).emit("cursor-update", {
         userId: socket.userId,
         position: data.position,
+        fileName: data.fileName || "",
         color: socket.userColor,
       });
     });
