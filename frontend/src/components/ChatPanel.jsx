@@ -55,7 +55,8 @@ function ChatPanel({ messages, onHide, typingUsers, onSendMessage, onTyping }) {
               <UserAvatar
                 className="h-8 w-8 rounded-full"
                 name={message.username}
-                user={{ avatar: message.avatar }}
+                ringColor={message.userColor}
+                user={{ avatar: message.avatar, userColor: message.userColor }}
               />
               <div>
                 <p className="text-sm font-semibold text-[#d4d4d4]">{message.username}</p>

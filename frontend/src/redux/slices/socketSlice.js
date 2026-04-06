@@ -7,6 +7,7 @@ const socketSlice = createSlice({
     approvalRequests: [],
     joinState: "idle",
     joinMessage: "",
+    roomUsers: [],
   },
   reducers: {
     setSocketStatus(state, action) {
@@ -24,10 +25,13 @@ const socketSlice = createSlice({
         (request) => request.socketId !== action.payload,
       );
     },
+    setRoomUsers(state, action) {
+      state.roomUsers = action.payload || [];
+    },
   },
 });
 
-export const { addApprovalRequest, removeApprovalRequest, setJoinState, setSocketStatus } =
+export const { addApprovalRequest, removeApprovalRequest, setJoinState, setSocketStatus, setRoomUsers } =
   socketSlice.actions;
 
 export default socketSlice.reducer;

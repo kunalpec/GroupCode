@@ -18,13 +18,14 @@ import EditorPane from "../components/EditorPane";
 import FileExplorer from "../components/FileExplorer";
 import RoomApprovalDialog from "../components/RoomApprovalDialog";
 import TerminalPane from "../components/TerminalPane";
+import UserAvatar from "../components/UserAvatar";
 import { getParentPath, joinPaths } from "../components/FileExplorer";
 import { Button } from "../components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { toast } from "../hooks/use-toast";
 import { addMessage, clearTypingUser, resetChat, setMessages, setTypingUser } from "../redux/slices/chatSlice";
 import { getRoomDirectory, getRooms, resetRoomWorkspace, setCurrentRoom } from "../redux/slices/roomSlice";
-import { addApprovalRequest, removeApprovalRequest, setJoinState, setSocketStatus } from "../redux/slices/socketSlice";
+import { addApprovalRequest, removeApprovalRequest, setJoinState, setRoomUsers, setSocketStatus } from "../redux/slices/socketSlice";
 import { connectSocket, disconnectSocket, getSocket } from "../services/socket";
 import { getAvatarUrl } from "../lib/avatar";
 
@@ -53,7 +54,7 @@ function Room() {
   const navigate = useNavigate();
   const { accessToken, isAuthenticated } = useSelector((state) => state.auth);
   const { rooms, currentRoom, entries } = useSelector((state) => state.room);
-  const { status, approvalRequests, joinState, joinMessage } = useSelector((state) => state.socket);
+  const { status, approvalRequests, joinState, joinMessage, roomUsers } = useSelector((state) => state.socket);
   const { messages, typingUsers } = useSelector((state) => state.chat);
   const [selectedFile, setSelectedFile] = useState("");
   const [editorContent, setEditorContent] = useState("");
@@ -84,6 +85,7 @@ function Room() {
       dispatch(resetRoomWorkspace());
       dispatch(resetChat());
       dispatch(setJoinState({ state: "idle", message: "" }));
+      dispatch(setRoomUsers([]));
       disconnectSocket();
     };
   }, [dispatch]);
@@ -94,6 +96,7 @@ function Room() {
     setIsReady(false);
     setCollaborators([]);
     dispatch(resetRoomWorkspace());
+    dispatch(setRoomUsers([]));
   }, [dispatch, inviteToken]);
 
   useEffect(() => {
@@ -144,6 +147,7 @@ function Room() {
 
         setIsReady(true);
         dispatch(setJoinState({ state: "approved", message: response.message || "Joined room" }));
+        dispatch(setRoomUsers(response.roomUsers || []));
         socket.emit("get-messages", { limit: 50 }, (historyResponse) => {
           if (historyResponse?.success) {
             dispatch(setMessages(historyResponse.messages.map(normalizeHistory)));
@@ -159,10 +163,11 @@ function Room() {
     const onDisconnect = () => dispatch(setSocketStatus("disconnected"));
     const onConnectError = () => dispatch(setSocketStatus("disconnected"));
     const onJoinRequest = (payload) => dispatch(addApprovalRequest(payload));
-    const onJoinApproved = () => {
+    const onJoinApproved = (payload) => {
       dispatch(setJoinState({ state: "approved", message: "Access granted." }));
       setIsReady(true);
       dispatch(getRooms());
+      dispatch(setRoomUsers(payload?.roomUsers || []));
       socket.emit("get-messages", { limit: 50 }, (historyResponse) => {
         if (historyResponse?.success) {
           dispatch(setMessages(historyResponse.messages.map(normalizeHistory)));
@@ -171,10 +176,12 @@ function Room() {
     };
     const onJoinRejected = () => {
       dispatch(setJoinState({ state: "rejected", message: "The owner rejected your request." }));
+      dispatch(setRoomUsers([]));
     };
     const onMessage = (payload) => dispatch(addMessage(payload));
     const onTyping = (payload) => dispatch(setTypingUser(payload));
     const onStopTyping = (payload) => dispatch(clearTypingUser(payload.userId));
+    const onRoomUsers = (payload) => dispatch(setRoomUsers(payload?.users || []));
     const onCursorUpdate = (payload) => {
       setCollaborators((current) => {
         const next = current.filter((entry) => entry.userId !== payload.userId);
@@ -183,6 +190,12 @@ function Room() {
     };
     const onUserLeft = (payload) => {
       setCollaborators((current) => current.filter((entry) => entry.userId !== payload.userId));
+      if (payload?.name) {
+        toast({
+          title: "Collaborator left",
+          description: `${payload.name} disconnected from the room.`,
+        });
+      }
     };
     const onCodeChange = (payload) => {
       if (payload.fileName !== selectedFile) return;
@@ -231,6 +244,7 @@ function Room() {
     socket.on("receive-message", onMessage);
     socket.on("typing", onTyping);
     socket.on("stop-typing", onStopTyping);
+    socket.on("room-users", onRoomUsers);
     socket.on("cursor-update", onCursorUpdate);
     socket.on("user-left", onUserLeft);
     socket.on("code-change", onCodeChange);
@@ -251,6 +265,7 @@ function Room() {
       socket.off("receive-message", onMessage);
       socket.off("typing", onTyping);
       socket.off("stop-typing", onStopTyping);
+      socket.off("room-users", onRoomUsers);
       socket.off("cursor-update", onCursorUpdate);
       socket.off("user-left", onUserLeft);
       socket.off("code-change", onCodeChange);
@@ -859,7 +874,7 @@ function Room() {
                     <MessageSquareText className="mr-2 h-4 w-4" />
                     Chat
                   </TabsTrigger>
-                  <TabsTrigger value="activity-panel">People</TabsTrigger>
+                  <TabsTrigger value="activity-panel">People ({roomUsers.length})</TabsTrigger>
                   </TabsList>
                   <Button
                     className="h-8 px-2 text-[#cccccc] hover:bg-[#2a2d2e]"
@@ -886,20 +901,30 @@ function Room() {
                 <div className="scrollbar-thin h-full overflow-y-auto bg-[#181818] p-4 text-sm text-[#9da1a6]">
                   <div className="mb-3 flex items-center gap-2 text-[#cccccc]">
                     <Users className="h-4 w-4 text-[#4fc1ff]" />
-                    Room activity
+                    People in room ({roomUsers.length})
                   </div>
                   <div className="space-y-2">
-                    {collaborators.length ? (
-                      collaborators.map((collaborator) => (
+                    {roomUsers.length ? (
+                      roomUsers.map((member) => (
                         <div
-                          key={`side-${collaborator.userId}`}
-                          className="rounded-md border border-[#2d2d30] bg-[#252526] px-3 py-2"
+                          key={`side-${member.userId}`}
+                          className="flex items-center gap-3 rounded-md border border-[#2d2d30] bg-[#252526] px-3 py-3"
                         >
-                          {collaborator.userId} at line {collaborator.position?.lineNumber}
+                          <UserAvatar
+                            className="h-10 w-10 rounded-full"
+                            name={member.name}
+                            ringColor={member.userColor}
+                            user={{ avatar: member.avatar, name: member.name }}
+                          />
+                          <div className="min-w-0">
+                            <p className="truncate font-medium text-white">{member.name}</p>
+                            <p className="truncate text-xs text-[#9da1a6]">{member.email || "No email available"}</p>
+                            <p className="text-[11px] text-[#858585]">{member.userColor}</p>
+                          </div>
                         </div>
                       ))
                     ) : (
-                      <p>No active cursor movement yet.</p>
+                      <p>No one else is connected right now.</p>
                     )}
                   </div>
                 </div>

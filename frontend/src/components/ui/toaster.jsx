@@ -24,30 +24,30 @@ function Toaster() {
             if (!open) dismissToast(toast.id);
           }}
           className={cn(
-            "fixed right-4 z-[100] w-80 rounded-2xl border p-4 shadow-xl backdrop-blur",
+            "fixed right-4 z-[100] w-[min(calc(100vw-2rem),28rem)] rounded-md border p-4 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-sm",
             toast.variant === "destructive"
-              ? "top-4 border-rose-500/40 bg-rose-950/90"
-              : "top-4 border-slate-700 bg-slate-900/95",
+              ? "top-4 border-[#be1100] bg-[#3a1d1d]/95"
+              : "top-4 border-[#3c3c3c] bg-[#252526]/95",
           )}
         >
           <div className="flex items-start justify-between gap-3">
-            <div className="space-y-1">
-              <ToastPrimitive.Title className="font-semibold text-slate-50">
+            <div className="min-w-0 space-y-1">
+              <ToastPrimitive.Title className="font-semibold text-[#f3f3f3]">
                 {toast.title}
               </ToastPrimitive.Title>
               {toast.description ? (
-                <ToastPrimitive.Description className="text-sm text-slate-300">
+                <ToastPrimitive.Description className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm leading-5 text-[#cccccc]">
                   {toast.description}
                 </ToastPrimitive.Description>
               ) : null}
             </div>
-            <ToastPrimitive.Close className="text-slate-400 hover:text-white">
+            <ToastPrimitive.Close className="shrink-0 text-[#858585] hover:text-white">
               <X className="h-4 w-4" />
             </ToastPrimitive.Close>
           </div>
         </ToastPrimitive.Root>
       ))}
-      <ToastPrimitive.Viewport />
+      <ToastPrimitive.Viewport className="fixed right-4 top-4 z-[100] flex max-w-[calc(100vw-2rem)] flex-col gap-3 outline-none" />
     </ToastPrimitive.Provider>
   );
 }

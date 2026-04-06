@@ -10,13 +10,19 @@ let io;
 // room_inviteToken → Set(userId)
 const roomUsers = new Map();
 
+// room_inviteToken → Map(userId, Set(socketId))
+const roomUserSockets = new Map();
+
+// room_inviteToken → Map(userId, member)
+const roomPresenceMap = new Map();
+
 // userId → socket.id
 const userSocketMap = new Map();
 
 // room_inviteToken → containerId
 export const roomContainerMap = new Map();
 
-// room_inviteToken → shell process
+// socket.id → shell process
 const roomShellMap = new Map();
 
 async function getRoomAndContainer(socket, inviteTokenOverride = "") {
@@ -38,8 +44,46 @@ async function getRoomAndContainer(socket, inviteTokenOverride = "") {
 }
 
 // =========================
-// 🔧 Helper
+// Helper
 // =========================
+function buildMemberFromSocket(socket) {
+  return {
+    userId: socket.userId,
+    name: socket.userName,
+    email: socket.userEmail || "",
+    avatar: socket.userAvatar || "",
+    userColor: socket.userColor || "#38bdf8",
+  };
+}
+
+function ensureRoomState(room_inviteToken) {
+  if (!roomUsers.has(room_inviteToken)) {
+    roomUsers.set(room_inviteToken, new Set());
+  }
+
+  if (!roomUserSockets.has(room_inviteToken)) {
+    roomUserSockets.set(room_inviteToken, new Map());
+  }
+
+  if (!roomPresenceMap.has(room_inviteToken)) {
+    roomPresenceMap.set(room_inviteToken, new Map());
+  }
+}
+
+function getRoomMembers(room_inviteToken) {
+  return Array.from(roomPresenceMap.get(room_inviteToken)?.values() || []);
+}
+
+function emitRoomPresence(room_inviteToken) {
+  if (!room_inviteToken) return;
+
+  io.to(room_inviteToken).emit("room-users", {
+    roomId: room_inviteToken,
+    users: getRoomMembers(room_inviteToken),
+    count: roomPresenceMap.get(room_inviteToken)?.size || 0,
+  });
+}
+
 async function addUserToRoom(room, socket) {
   const { userId, room_inviteToken } = socket;
 
@@ -48,12 +92,37 @@ async function addUserToRoom(room, socket) {
     await room.save();
   }
 
-  if (!roomUsers.has(room_inviteToken)) {
-    roomUsers.set(room_inviteToken, new Set());
+  ensureRoomState(room_inviteToken);
+  roomUsers.get(room_inviteToken).add(userId);
+  const socketMap = roomUserSockets.get(room_inviteToken);
+  const userSockets = socketMap.get(userId) || new Set();
+  userSockets.add(socket.id);
+  socketMap.set(userId, userSockets);
+  roomPresenceMap.get(room_inviteToken).set(userId, buildMemberFromSocket(socket));
+  userSocketMap.set(userId, socket.id);
+
+  emitRoomPresence(room_inviteToken);
+}
+
+function removeUserFromRoom(socket) {
+  const { room_inviteToken, userId } = socket;
+  if (!room_inviteToken || !userId) return false;
+
+  const socketMap = roomUserSockets.get(room_inviteToken);
+  const userSockets = socketMap?.get(userId);
+  if (!userSockets) return false;
+
+  userSockets.delete(socket.id);
+
+  if (userSockets.size > 0) {
+    return false;
   }
 
-  roomUsers.get(room_inviteToken).add(userId);
-  userSocketMap.set(userId, socket.id);
+  socketMap.delete(userId);
+  roomUsers.get(room_inviteToken)?.delete(userId);
+  roomPresenceMap.get(room_inviteToken)?.delete(userId);
+  emitRoomPresence(room_inviteToken);
+  return true;
 }
 
 function isValidFileName(fileName) {
@@ -122,6 +191,7 @@ const startIoServer = (server) => {
             roomName: room.roomName,
             path: room.path,
             users: room.users,
+            roomUsers: getRoomMembers(inviteToken),
           });
         }
 
@@ -135,6 +205,7 @@ const startIoServer = (server) => {
             roomName: room.roomName,
             path: room.path,
             users: room.users,
+            roomUsers: getRoomMembers(inviteToken),
             userColor: socket.userColor,
             isOwner: true,
           });
@@ -193,11 +264,13 @@ const startIoServer = (server) => {
         io.to(socketId).emit("join-approved", {
           roomId,
           roomName: room.roomName,
+          roomUsers: getRoomMembers(roomId),
         });
 
         targetSocket.to(roomId).emit("user-joined-notification", {
           userId: targetSocket.userId,
           name: targetSocket.userName,
+          email: targetSocket.userEmail,
           avatar: targetSocket.userAvatar,
           userColor: targetSocket.userColor,
         });
@@ -230,8 +303,9 @@ const startIoServer = (server) => {
     // =========================
     socket.on("start-terminal", async ({ inviteToken } = {}) => {
       const room_inviteToken = inviteToken || socket.room_inviteToken;
+      const shellKey = socket.id;
 
-      if (roomShellMap.has(room_inviteToken)) return;
+      if (roomShellMap.has(shellKey)) return;
 
       try {
         const { room, containerId } = await getRoomAndContainer(socket, room_inviteToken);
@@ -239,22 +313,29 @@ const startIoServer = (server) => {
           "exec",
           "-i",
           containerId,
-          "bash",
-          "-lc",
-          `cd ${shellEscape(room?.path || "/home/user")} && exec bash`,
-        ]);
-        roomShellMap.set(room_inviteToken, shell);
+          "script",
+          "-qec",
+          `cd ${shellEscape(room?.path || "/home/user")} && export TERM=xterm-256color && exec bash -i`,
+          "/dev/null",
+        ], {
+          env: {
+            ...process.env,
+            TERM: "xterm-256color",
+          },
+        });
+        roomShellMap.set(shellKey, shell);
 
         shell.stdout.on("data", (data) => {
-          io.to(room_inviteToken).emit("terminal-output", data.toString());
+          io.to(socket.id).emit("terminal-output", data.toString());
         });
 
         shell.stderr.on("data", (data) => {
-          io.to(room_inviteToken).emit("terminal-output", data.toString());
+          io.to(socket.id).emit("terminal-output", data.toString());
         });
 
         shell.on("close", () => {
-          roomShellMap.delete(room_inviteToken);
+          roomShellMap.delete(shellKey);
+          io.to(socket.id).emit("terminal-output", "\r\n[terminal closed]\r\n");
         });
       } catch (error) {
         io.to(socket.id).emit("terminal-output", `\r\n[terminal error] ${error.message}\r\n`);
@@ -265,7 +346,7 @@ const startIoServer = (server) => {
     // 5. TERMINAL INPUT
     // =========================
     socket.on("terminal-input", (data) => {
-      const shell = roomShellMap.get(socket.room_inviteToken);
+      const shell = roomShellMap.get(socket.id);
       if (shell?.stdin?.writable) {
         shell.stdin.write(data);
       }
@@ -521,25 +602,34 @@ const startIoServer = (server) => {
     // =========================
     socket.on("disconnect", () => {
       const room_inviteToken = socket.room_inviteToken;
+      const shell = roomShellMap.get(socket.id);
 
-      const users = roomUsers.get(room_inviteToken);
-      if (users) {
-        users.delete(socket.userId);
-
-        socket.to(room_inviteToken).emit("user-left", {
-          userId: socket.userId,
-        });
-
-        if (users.size === 0) {
-          const shell = roomShellMap.get(room_inviteToken);
-          if (shell) shell.kill();
-
-          roomShellMap.delete(room_inviteToken);
-          roomUsers.delete(room_inviteToken);
-        }
+      if (shell) {
+        shell.kill();
+        roomShellMap.delete(socket.id);
       }
 
-      userSocketMap.delete(socket.userId);
+      const userRemoved = removeUserFromRoom(socket);
+      if (userRemoved) {
+        socket.to(room_inviteToken).emit("user-left", {
+          userId: socket.userId,
+          name: socket.userName,
+          email: socket.userEmail,
+          avatar: socket.userAvatar,
+          userColor: socket.userColor,
+        });
+      }
+
+      const users = roomUsers.get(room_inviteToken);
+      if (users?.size === 0) {
+        roomUsers.delete(room_inviteToken);
+        roomUserSockets.delete(room_inviteToken);
+        roomPresenceMap.delete(room_inviteToken);
+      }
+
+      if (userSocketMap.get(socket.userId) === socket.id) {
+        userSocketMap.delete(socket.userId);
+      }
     });
   });
 

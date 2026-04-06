@@ -1,6 +1,7 @@
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV TERM=xterm-256color
 
 # Install basic tools + Python
 RUN apt-get update && apt-get install -y \
@@ -10,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     git \
     bash \
+    util-linux \
     && apt-get clean
 
 # Install Node.js (no npm update)

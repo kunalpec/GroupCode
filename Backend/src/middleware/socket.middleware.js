@@ -30,7 +30,7 @@ const socketAuthMiddleware = async (socket, next) => {
     const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
 
     // Fixed: decoded._id (matching generateAccessToken)
-    const user = await User.findById(decoded._id).select("_id name avatar oauthImage userColor");
+    const user = await User.findById(decoded._id).select("_id name email avatar oauthImage userColor");
 
     if (!user) {
       return next(new Error("Unauthorized: User not found"));
@@ -49,6 +49,7 @@ const socketAuthMiddleware = async (socket, next) => {
     // Attach to socket
     socket.userId = user._id.toString();
     socket.userName = user.name;
+    socket.userEmail = user.email;
     socket.userAvatar = user.avatar?.url || user.oauthImage || "";
     socket.userColor = user.userColor;
 

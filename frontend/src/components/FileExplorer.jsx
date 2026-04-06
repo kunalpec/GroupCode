@@ -103,33 +103,33 @@ function TreeNode({
   onToggle,
   selectedFile,
 }) {
-  const tag = node.type === "folder" ? "DIR" : "FILE";
-
   if (node.type === "folder") {
     const expanded = expandedFolders[node.path] ?? true;
 
     return (
       <div>
         <button
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-[#cccccc] transition hover:bg-[#2a2d2e]"
+          className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-[#d4d4d4] transition hover:bg-[#20252d]"
           onClick={() => onToggle(node.path)}
           onContextMenu={(event) => onContextMenu(event, node)}
           style={{ paddingLeft: `${8 + depth * 14}px` }}
           type="button"
         >
           {expanded ? (
-            <ChevronDown className="h-4 w-4 shrink-0 text-[#cccccc]" />
+            <ChevronDown className="h-4 w-4 shrink-0 text-[#8b949e]" />
           ) : (
-            <ChevronRight className="h-4 w-4 shrink-0 text-[#cccccc]" />
+            <ChevronRight className="h-4 w-4 shrink-0 text-[#8b949e]" />
           )}
-          {expanded ? (
-            <FolderOpen className="h-4 w-4 shrink-0 text-[#d7ba7d]" />
-          ) : (
-            <Folder className="h-4 w-4 shrink-0 text-[#d7ba7d]" />
-          )}
-          <span className="truncate">{node.name}</span>
-          <span className="ml-auto rounded bg-[#2d2d30] px-1.5 py-0.5 text-[10px] text-[#8c8c8c]">
-            {tag}
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[#2a3441] bg-[#1a2230]">
+            {expanded ? (
+              <FolderOpen className="h-4 w-4 shrink-0 text-[#e3b341]" />
+            ) : (
+              <Folder className="h-4 w-4 shrink-0 text-[#e3b341]" />
+            )}
+          </span>
+          <span className="truncate font-medium">{node.name}</span>
+          <span className="ml-auto text-[10px] uppercase tracking-[0.14em] text-[#6e7681] opacity-0 transition group-hover:opacity-100">
+            Folder
           </span>
         </button>
 
@@ -154,20 +154,22 @@ function TreeNode({
   return (
     <button
       className={cn(
-        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition",
+        "group flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left text-sm transition",
         selectedFile === node.path
-          ? "bg-[#37373d] text-[#ffffff]"
-          : "text-[#cccccc] hover:bg-[#2a2d2e]",
+          ? "border-[#414852] bg-[#2c313a] text-[#ffffff] shadow-[inset_3px_0_0_#3794ff]"
+          : "text-[#c8d1d9] hover:bg-[#20252d]",
       )}
       onClick={() => onSelectFile(node.path)}
       onContextMenu={(event) => onContextMenu(event, node)}
       style={{ paddingLeft: `${30 + depth * 14}px` }}
       type="button"
     >
-      {getFileIcon(node.path)}
-      <span className="truncate">{node.name}</span>
-      <span className="ml-auto rounded bg-[#2d2d30] px-1.5 py-0.5 text-[10px] text-[#8c8c8c]">
-        {tag}
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[#30363d] bg-[#161b22]">
+        {getFileIcon(node.path)}
+      </span>
+      <span className="truncate font-medium">{node.name}</span>
+      <span className="ml-auto text-[10px] uppercase tracking-[0.14em] text-[#6e7681] opacity-0 transition group-hover:opacity-100">
+        File
       </span>
     </button>
   );
