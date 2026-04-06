@@ -328,7 +328,7 @@ const startIoServer = (server) => {
           "-i",
           containerId,
           "script",
-          "-qec",
+          "-qefc",
           `cd ${shellEscape(room?.path || "/home/user")} && export TERM=xterm-256color && exec bash -i`,
           "/dev/null",
         ], {

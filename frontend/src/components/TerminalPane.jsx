@@ -25,7 +25,7 @@ function TerminalPane({
   const activeSessionIdRef = useRef(activeSessionId);
   const renderedSessionIdRef = useRef("");
   const renderedBufferRef = useRef("");
-  const pendingEchoRef = useRef("");
+  const pendingLineRef = useRef({});
   const activeSession = sessions.find((session) => session.id === activeSessionId) || sessions[0] || null;
 
   useEffect(() => {
@@ -70,22 +70,31 @@ function TerminalPane({
 
     const disposeData = terminal.onData((data) => {
       if (!activeSessionIdRef.current) return;
+      const terminalId = activeSessionIdRef.current;
+      const currentLine = pendingLineRef.current[terminalId] || "";
 
-      // Show typed characters immediately so the terminal feels responsive.
+      if (data === "\r") {
+        terminal.write("\r\n");
+        socket?.emit("terminal-input", { terminalId, data: `${currentLine}\n` });
+        pendingLineRef.current[terminalId] = "";
+        onTerminalActivity?.();
+        return;
+      }
+
       if (data === "\u007f") {
-        if (pendingEchoRef.current) {
-          pendingEchoRef.current = pendingEchoRef.current.slice(0, -1);
+        if (currentLine) {
+          pendingLineRef.current[terminalId] = currentLine.slice(0, -1);
           terminal.write("\b \b");
         }
-      } else if (data !== "\r") {
-        pendingEchoRef.current += data;
-        terminal.write(data);
+        return;
       }
 
-      socket?.emit("terminal-input", { terminalId: activeSessionIdRef.current, data });
-      if (data.includes("\r")) {
-        onTerminalActivity?.();
+      if (data.startsWith("\u001b")) {
+        return;
       }
+
+      pendingLineRef.current[terminalId] = `${currentLine}${data}`;
+      terminal.write(data);
     });
 
     return () => {
@@ -111,11 +120,11 @@ function TerminalPane({
       terminal.write(nextBuffer);
       renderedSessionIdRef.current = nextSessionId;
       renderedBufferRef.current = nextBuffer;
-      pendingEchoRef.current = "";
+      terminal.write(pendingLineRef.current[nextSessionId] || "");
     } else if (!nextBuffer && renderedBufferRef.current) {
       terminal.reset();
       renderedBufferRef.current = "";
-      pendingEchoRef.current = "";
+      terminal.write(pendingLineRef.current[nextSessionId] || "");
     }
 
     fitAddonRef.current?.fit();
@@ -142,23 +151,8 @@ function TerminalPane({
       }
 
       const originalData = payload.data || "";
-      let visibleData = originalData;
-
-      if (pendingEchoRef.current && visibleData) {
-        let matched = 0;
-        const limit = Math.min(visibleData.length, pendingEchoRef.current.length);
-        while (matched < limit && visibleData[matched] === pendingEchoRef.current[matched]) {
-          matched += 1;
-        }
-
-        if (matched > 0) {
-          visibleData = visibleData.slice(matched);
-          pendingEchoRef.current = pendingEchoRef.current.slice(matched);
-        }
-      }
-
-      if (visibleData) {
-        terminalRef.current?.write(visibleData);
+      if (originalData) {
+        terminalRef.current?.write(originalData);
       }
 
       renderedSessionIdRef.current = payload.terminalId;
