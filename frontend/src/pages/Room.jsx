@@ -63,9 +63,13 @@ function getRunCommand(filePath) {
 
   if (extension === "py") return `python3 "./${escapedPath}"\r`;
   if (extension === "js") return `node "./${escapedPath}"\r`;
+  if (extension === "mjs") return `node "./${escapedPath}"\r`;
+  if (extension === "cjs") return `node "./${escapedPath}"\r`;
   if (extension === "sh") return `bash "./${escapedPath}"\r`;
+  if (extension === "bash") return `bash "./${escapedPath}"\r`;
+  if (extension === "zsh") return `zsh "./${escapedPath}"\r`;
 
-  return "";
+  return `chmod +x "./${escapedPath}" 2>/dev/null; "./${escapedPath}"\r`;
 }
 
 function Room() {

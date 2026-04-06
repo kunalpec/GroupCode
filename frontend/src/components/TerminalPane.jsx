@@ -61,6 +61,7 @@ function TerminalPane({
     terminal.loadAddon(fitAddon);
     terminal.open(containerRef.current);
     fitAddon.fit();
+    terminal.focus();
     fitAddonRef.current = fitAddon;
     terminalRef.current = terminal;
 
@@ -105,42 +106,21 @@ function TerminalPane({
     const nextBuffer = activeSession?.buffer || "";
     const terminal = terminalRef.current;
 
-    if (renderedSessionIdRef.current !== nextSessionId) {
+    if (renderedSessionIdRef.current !== nextSessionId || renderedBufferRef.current === "") {
       terminal.reset();
       terminal.write(nextBuffer);
+      renderedSessionIdRef.current = nextSessionId;
+      renderedBufferRef.current = nextBuffer;
       pendingEchoRef.current = "";
-    } else if (!nextBuffer) {
+    } else if (!nextBuffer && renderedBufferRef.current) {
       terminal.reset();
-      pendingEchoRef.current = "";
-    } else if (nextBuffer.startsWith(renderedBufferRef.current)) {
-      let delta = nextBuffer.slice(renderedBufferRef.current.length);
-
-      if (pendingEchoRef.current && delta) {
-        let matched = 0;
-        const limit = Math.min(delta.length, pendingEchoRef.current.length);
-        while (matched < limit && delta[matched] === pendingEchoRef.current[matched]) {
-          matched += 1;
-        }
-
-        if (matched > 0) {
-          delta = delta.slice(matched);
-          pendingEchoRef.current = pendingEchoRef.current.slice(matched);
-        }
-      }
-
-      if (delta) {
-        terminal.write(delta);
-      }
-    } else {
-      terminal.reset();
-      terminal.write(nextBuffer);
+      renderedBufferRef.current = "";
       pendingEchoRef.current = "";
     }
 
-    renderedSessionIdRef.current = nextSessionId;
-    renderedBufferRef.current = nextBuffer;
     fitAddonRef.current?.fit();
-  }, [active, activeSession?.buffer, activeSessionId]);
+    terminal.focus();
+  }, [active, activeSessionId, activeSession?.buffer]);
 
   useEffect(() => {
     if (!socket || !active || !ready || !activeSessionId) {
@@ -150,6 +130,46 @@ function TerminalPane({
     socket.emit("start-terminal", { inviteToken, terminalId: activeSessionId });
     return undefined;
   }, [active, activeSessionId, inviteToken, ready, socket]);
+
+  useEffect(() => {
+    if (!socket || !active || !terminalRef.current) {
+      return undefined;
+    }
+
+    const handleOutput = (payload) => {
+      if (!payload?.terminalId || payload.terminalId !== activeSessionIdRef.current) {
+        return;
+      }
+
+      const originalData = payload.data || "";
+      let visibleData = originalData;
+
+      if (pendingEchoRef.current && visibleData) {
+        let matched = 0;
+        const limit = Math.min(visibleData.length, pendingEchoRef.current.length);
+        while (matched < limit && visibleData[matched] === pendingEchoRef.current[matched]) {
+          matched += 1;
+        }
+
+        if (matched > 0) {
+          visibleData = visibleData.slice(matched);
+          pendingEchoRef.current = pendingEchoRef.current.slice(matched);
+        }
+      }
+
+      if (visibleData) {
+        terminalRef.current?.write(visibleData);
+      }
+
+      renderedSessionIdRef.current = payload.terminalId;
+      renderedBufferRef.current = `${renderedBufferRef.current}${originalData}`;
+    };
+
+    socket.on("terminal-output", handleOutput);
+    return () => {
+      socket.off("terminal-output", handleOutput);
+    };
+  }, [active, socket]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[#1e1e1e]">
