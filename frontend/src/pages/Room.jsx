@@ -48,6 +48,24 @@ function toRelativeWorkspacePath(roomPath, absolutePath) {
   return relativePath.startsWith("/") ? relativePath : `/${relativePath}`;
 }
 
+function getCollaboratorTone(color = "#38bdf8") {
+  const normalized = String(color).trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(normalized)) {
+    return `${normalized}22`;
+  }
+
+  if (/^#[0-9a-fA-F]{3}$/.test(normalized)) {
+    const expanded = normalized
+      .slice(1)
+      .split("")
+      .map((value) => value + value)
+      .join("");
+    return `#${expanded}22`;
+  }
+
+  return "rgba(56, 189, 248, 0.12)";
+}
+
 function createTerminalSession(index) {
   return {
     id: `terminal-${index}`,
@@ -101,6 +119,7 @@ function Room() {
     () => currentRoom || rooms.find((item) => item.inviteToken === inviteToken) || null,
     [currentRoom, inviteToken, rooms],
   );
+  const roomUserMap = useMemo(() => new Map(roomUsers.map((member) => [member.userId, member])), [roomUsers]);
 
   useEffect(() => {
     dispatch(getRooms());
@@ -964,14 +983,40 @@ function Room() {
                       </div>
                       <div className="space-y-2">
                         {collaborators.length ? (
-                          collaborators.map((collaborator) => (
-                            <div
-                              key={collaborator.userId}
-                              className="rounded-md border border-[#2d2d30] bg-[#252526] px-3 py-2"
-                            >
-                              {collaborator.userId} at line {collaborator.position?.lineNumber}
-                            </div>
-                          ))
+                          collaborators.map((collaborator) => {
+                            const member = roomUserMap.get(collaborator.userId);
+                            const displayName = member?.name || collaborator.name || "Collaborator";
+                            const profileColor = member?.userColor || collaborator.color || "#38bdf8";
+                            const avatar = member?.avatar || collaborator.avatar || "";
+                            const lineNumber = collaborator.position?.lineNumber || 1;
+
+                            return (
+                              <div
+                                key={collaborator.userId}
+                                className="flex min-h-[54px] items-center gap-3 rounded-md border border-[#2d2d30] px-3 py-2"
+                                style={{ backgroundColor: getCollaboratorTone(profileColor) }}
+                              >
+                                <UserAvatar
+                                  className="h-9 w-9"
+                                  fallbackClassName="text-[11px]"
+                                  name={displayName}
+                                  ringColor={profileColor}
+                                  user={{ avatar, name: displayName }}
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <p className="truncate text-sm font-semibold text-white">{displayName}</p>
+                                    <span
+                                      aria-hidden="true"
+                                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                      style={{ backgroundColor: profileColor }}
+                                    />
+                                  </div>
+                                  <p className="truncate text-xs text-[#c7d2da]">Writing at line {lineNumber}</p>
+                                </div>
+                              </div>
+                            );
+                          })
                         ) : (
                           <p>No live cursor movement yet.</p>
                         )}
