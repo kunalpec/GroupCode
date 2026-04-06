@@ -22,6 +22,9 @@ function TerminalPane({
   const containerRef = useRef(null);
   const terminalRef = useRef(null);
   const fitAddonRef = useRef(null);
+  const socketRef = useRef(socket);
+  const readyRef = useRef(ready);
+  const onTerminalActivityRef = useRef(onTerminalActivity);
   const activeSessionIdRef = useRef(activeSessionId);
   const renderedSessionIdRef = useRef("");
   const renderedBufferRef = useRef("");
@@ -29,11 +32,23 @@ function TerminalPane({
   const activeSession = sessions.find((session) => session.id === activeSessionId) || sessions[0] || null;
 
   useEffect(() => {
+    socketRef.current = socket;
+  }, [socket]);
+
+  useEffect(() => {
+    readyRef.current = ready;
+  }, [ready]);
+
+  useEffect(() => {
+    onTerminalActivityRef.current = onTerminalActivity;
+  }, [onTerminalActivity]);
+
+  useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
 
   useEffect(() => {
-    if (!active || !ready || !containerRef.current || terminalRef.current) {
+    if (!containerRef.current || terminalRef.current) {
       return undefined;
     }
 
@@ -70,15 +85,16 @@ function TerminalPane({
 
     const disposeData = terminal.onData((data) => {
       if (!activeSessionIdRef.current) return;
+      if (!readyRef.current || !socketRef.current) return;
       const terminalId = activeSessionIdRef.current;
       const currentLine = pendingLineRef.current[terminalId] || "";
 
       if (data === "\r") {
         terminal.write("\r\n");
         renderedBufferRef.current = `${renderedBufferRef.current}${currentLine}\r\n`;
-        socket?.emit("terminal-input", { terminalId, data: `${currentLine}\n` });
+        socketRef.current.emit("terminal-input", { terminalId, data: `${currentLine}\n` });
         pendingLineRef.current[terminalId] = "";
-        onTerminalActivity?.();
+        onTerminalActivityRef.current?.();
         return;
       }
 
@@ -105,7 +121,7 @@ function TerminalPane({
       fitAddonRef.current = null;
       terminalRef.current = null;
     };
-  }, [active, onTerminalActivity, ready, socket]);
+  }, []);
 
   useEffect(() => {
     if (!active || !terminalRef.current) {
