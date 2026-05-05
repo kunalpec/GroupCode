@@ -32,6 +32,14 @@ This project is being built to make shared coding sessions simpler:
       <img src="https://github.com/user-attachments/assets/4cefbc43-4100-41fe-9185-60855d8231a8" alt="Additional project view" width="460" />
     </td>
   </tr>
+  <tr>
+    <td align="center" valign="top">
+      <img src="https://github.com/user-attachments/assets/b90dba98-5829-49f0-93d1-d0452fad7be9" alt="Project screenshot 6" width="460" />
+    </td>
+    <td align="center" valign="top">
+      <img src="https://github.com/user-attachments/assets/3a2f7162-733a-40b4-8641-411c74361b00" alt="Project screenshot 7" width="460" />
+    </td>
+  </tr>
 </table>
 
 ## Features
