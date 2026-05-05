@@ -28,11 +28,6 @@ This project is being built to make shared coding sessions simpler:
     </td>
   </tr>
   <tr>
-    <td align="center" valign="top" colspan="2">
-      <img src="https://github.com/user-attachments/assets/4cefbc43-4100-41fe-9185-60855d8231a8" alt="Additional project view" width="460" />
-    </td>
-  </tr>
-  <tr>
     <td align="center" valign="top">
       <img src="https://github.com/user-attachments/assets/b90dba98-5829-49f0-93d1-d0452fad7be9" alt="Project screenshot 6" width="460" />
     </td>
