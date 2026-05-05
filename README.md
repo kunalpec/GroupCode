@@ -8,7 +8,31 @@ This project is being built to make shared coding sessions simpler:
 - manage workspace access from one dashboard
 - expose useful service ports from each user container
 
-Screenshots and UI images can be added later in this README.
+## Screenshots
+
+<table align="center">
+  <tr>
+    <td align="center" valign="top">
+      <img src="https://github.com/user-attachments/assets/c531a52c-6921-453a-ad30-b75cc3d0a877" alt="Dashboard view" width="460" />
+    </td>
+    <td align="center" valign="top">
+      <img src="https://github.com/user-attachments/assets/c2182d82-e07c-4f4d-853c-932cf7a22532" alt="Room interface" width="460" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top">
+      <img src="https://github.com/user-attachments/assets/09130d0d-3e4a-49f0-891e-08662015a928" alt="Invite flow" width="460" />
+    </td>
+    <td align="center" valign="top">
+      <img src="https://github.com/user-attachments/assets/448f3484-2640-4014-a3ea-b05a107b4eee" alt="Workspace ports" width="460" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" colspan="2">
+      <img src="https://github.com/user-attachments/assets/4cefbc43-4100-41fe-9185-60855d8231a8" alt="Additional project view" width="460" />
+    </td>
+  </tr>
+</table>
 
 ## Features
 
