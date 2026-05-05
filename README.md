@@ -9,6 +9,7 @@ This project is being built to make shared coding sessions simpler:
 - expose useful service ports from each user container
 
 Screenshots and UI images can be added later in this README.
+<img width="1905" height="892" alt="{EF7E7407-7525-43CF-B63F-16C329A33B19}" src="https://github.com/user-attachments/assets/c531a52c-6921-453a-ad30-b75cc3d0a877" />
 
 ## Features
 
