@@ -69,6 +69,10 @@ const userSchema = new Schema(
       type: String,
       default:"",
     },
+    containerServices: {
+      type: Schema.Types.Mixed,
+      default: {},
+    },
     userColor: {
       type: String,
     },

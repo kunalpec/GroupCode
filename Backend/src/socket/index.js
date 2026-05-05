@@ -24,6 +24,7 @@ export const roomContainerMap = new Map();
 
 // socket.id → shell process
 const roomShellMap = new Map();
+const SHELL_PID_MARKER = "__ONLINE_VSCODE_SHELL_PID__:";
 
 async function getRoomAndContainer(socket, inviteTokenOverride = "") {
   const resolvedInviteToken = inviteTokenOverride || socket.room_inviteToken;
@@ -88,14 +89,112 @@ function getTerminalSessionKey(socketId, terminalId = "terminal-1") {
   return `${socketId}:${terminalId}`;
 }
 
-function closeSocketTerminals(socket) {
-  const prefix = `${socket.id}:`;
+async function runSignalScript(containerId, shellPid, signal, includeShell = false) {
+  const normalizedPid = Number.parseInt(shellPid, 10);
+  if (!containerId || Number.isNaN(normalizedPid) || normalizedPid <= 0) return;
 
-  for (const [key, shell] of roomShellMap.entries()) {
+  await runDocker([
+    "exec",
+    containerId,
+    "bash",
+    "-lc",
+    `
+collect_descendants() {
+  local root_pid="$1"
+  local current_pid
+  local child_pid
+  local queue="$1"
+  local descendants=""
+
+  while [ -n "$queue" ]; do
+    current_pid="\${queue%% *}"
+
+    if [ "$queue" = "$current_pid" ]; then
+      queue=""
+    else
+      queue="\${queue#* }"
+    fi
+
+    while read -r child_pid parent_pid; do
+      if [ "$parent_pid" = "$current_pid" ]; then
+        descendants="$descendants $child_pid"
+        queue="$queue $child_pid"
+      fi
+    done <<EOF
+$(ps -eo pid=,ppid=)
+EOF
+  done
+
+  echo "$descendants"
+}
+
+for pid in $(collect_descendants "${normalizedPid}"); do
+  kill -s ${signal} "$pid" 2>/dev/null || true
+done
+
+${includeShell ? `kill -s ${signal} "${normalizedPid}" 2>/dev/null || true` : ""}
+`.trim(),
+  ]).catch(() => {});
+}
+
+async function interruptNodeProcesses(containerId) {
+  if (!containerId) return;
+
+  await runDocker([
+    "exec",
+    containerId,
+    "bash",
+    "-lc",
+    "pkill -INT node 2>/dev/null || true; pkill -INT -f nodemon 2>/dev/null || true",
+  ]).catch(() => {});
+}
+
+function extractShellPid(session, output = "") {
+  if (!output) return "";
+
+  const combined = `${session.pendingOutput || ""}${output}`;
+  const markerIndex = combined.indexOf(SHELL_PID_MARKER);
+
+  if (markerIndex === -1) {
+    if (session.shellPid) {
+      return combined;
+    }
+
+    session.pendingOutput = combined;
+    return "";
+  }
+
+  const lineEndIndex = combined.indexOf("\n", markerIndex);
+  if (lineEndIndex === -1) {
+    session.pendingOutput = combined;
+    return "";
+  }
+
+  const markerContent = combined.slice(markerIndex, lineEndIndex).replace(/\r/g, "");
+  const parsedPid = markerContent.slice(SHELL_PID_MARKER.length).trim();
+  const beforeMarker = combined.slice(0, markerIndex);
+  const afterMarker = combined.slice(lineEndIndex + 1);
+
+  if (!session.shellPid && /^\d+$/.test(parsedPid)) {
+    session.shellPid = Number(parsedPid);
+  }
+
+  session.pendingOutput = "";
+  return `${beforeMarker}${afterMarker}`;
+}
+
+async function closeSocketTerminals(socket) {
+  const prefix = `${socket.id}:`;
+  const closeOperations = [];
+
+  for (const [key, session] of roomShellMap.entries()) {
     if (!key.startsWith(prefix)) continue;
-    shell.kill();
+    closeOperations.push(runSignalScript(session.containerId, session.shellPid, "TERM", true));
+    session.shell.kill();
     roomShellMap.delete(key);
   }
+
+  await Promise.allSettled(closeOperations);
 }
 
 async function addUserToRoom(room, socket) {
@@ -329,7 +428,7 @@ const startIoServer = (server) => {
           containerId,
           "script",
           "-qefc",
-          `cd ${shellEscape(room?.path || "/home/user")} && export TERM=xterm-256color && exec bash -i`,
+          `printf '${SHELL_PID_MARKER}%s\\n' "$$" && cd ${shellEscape(room?.path || "/home/user")} && export TERM=xterm-256color && exec bash -i`,
           "/dev/null",
         ], {
           env: {
@@ -337,14 +436,26 @@ const startIoServer = (server) => {
             TERM: "xterm-256color",
           },
         });
-        roomShellMap.set(shellKey, shell);
+        const session = {
+          shell,
+          containerId,
+          shellPid: null,
+          pendingOutput: "",
+        };
+        roomShellMap.set(shellKey, session);
 
         shell.stdout.on("data", (data) => {
-          io.to(socket.id).emit("terminal-output", { terminalId, data: data.toString() });
+          const cleaned = extractShellPid(session, data.toString());
+          if (cleaned) {
+            io.to(socket.id).emit("terminal-output", { terminalId, data: cleaned });
+          }
         });
 
         shell.stderr.on("data", (data) => {
-          io.to(socket.id).emit("terminal-output", { terminalId, data: data.toString() });
+          const cleaned = extractShellPid(session, data.toString());
+          if (cleaned) {
+            io.to(socket.id).emit("terminal-output", { terminalId, data: cleaned });
+          }
         });
 
         shell.on("close", () => {
@@ -363,9 +474,16 @@ const startIoServer = (server) => {
     // 5. TERMINAL INPUT
     // =========================
     socket.on("terminal-input", ({ terminalId = "terminal-1", data } = {}) => {
-      const shell = roomShellMap.get(getTerminalSessionKey(socket.id, terminalId));
-      if (shell?.stdin?.writable) {
-        shell.stdin.write(data);
+      const session = roomShellMap.get(getTerminalSessionKey(socket.id, terminalId));
+      if (!session) return;
+
+      if (data === "\u0003") {
+        interruptNodeProcesses(session.containerId);
+        runSignalScript(session.containerId, session.shellPid, "INT");
+      }
+
+      if (session.shell?.stdin?.writable) {
+        session.shell.stdin.write(data);
       }
     });
 
@@ -620,7 +738,7 @@ const startIoServer = (server) => {
     // =========================
     socket.on("disconnect", () => {
       const room_inviteToken = socket.room_inviteToken;
-      closeSocketTerminals(socket);
+      void closeSocketTerminals(socket);
 
       const userRemoved = removeUserFromRoom(socket);
       if (userRemoved) {

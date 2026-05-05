@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Eraser, PanelBottomClose, Play, Plus, TerminalSquare } from "lucide-react";
+import { Eraser, PanelBottomClose, Play, Plus, TerminalSquare, X } from "lucide-react";
 import { Button } from "./ui/button";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
@@ -14,6 +14,7 @@ function TerminalPane({
   sessions,
   activeSessionId,
   onActiveSessionChange,
+  onCloseSession,
   onCreateSession,
   onClearSession,
   onRunFile,
@@ -30,7 +31,10 @@ function TerminalPane({
   const renderedBufferRef = useRef("");
   const pendingLineRef = useRef({});
   const submittedLineRef = useRef({});
+  const suppressPromptRef = useRef({});
   const activeSession = sessions.find((session) => session.id === activeSessionId) || sessions[0] || null;
+  const longRunningCommandPattern = /^(npm\s+(run\s+dev|start)\b|uvicorn\b)/i;
+  const shellPromptPattern = /(?:^|\r?\n)([^\r\n]*@[^\r\n]*:[^\r\n]*[$#] ?)/g;
 
   useEffect(() => {
     socketRef.current = socket;
@@ -90,10 +94,21 @@ function TerminalPane({
       const terminalId = activeSessionIdRef.current;
       const currentLine = pendingLineRef.current[terminalId] || "";
 
+      if (data === "\u0003") {
+        pendingLineRef.current[terminalId] = "";
+        submittedLineRef.current[terminalId] = "";
+        suppressPromptRef.current[terminalId] = false;
+        socketRef.current.emit("terminal-input", { terminalId, data });
+        onTerminalActivityRef.current?.();
+        return;
+      }
+
       if (data === "\r") {
+        const trimmedLine = currentLine.trim();
         terminal.write("\r\n");
         renderedBufferRef.current = `${renderedBufferRef.current}${currentLine}\r\n`;
         submittedLineRef.current[terminalId] = currentLine;
+        suppressPromptRef.current[terminalId] = longRunningCommandPattern.test(trimmedLine);
         socketRef.current.emit("terminal-input", { terminalId, data: `${currentLine}\n` });
         pendingLineRef.current[terminalId] = "";
         onTerminalActivityRef.current?.();
@@ -189,6 +204,13 @@ function TerminalPane({
         }
       }
 
+      if (suppressPromptRef.current[terminalId]) {
+        originalData = originalData.replace(shellPromptPattern, (match, prompt, offset) => {
+          const prefix = match.startsWith("\r\n") ? "\r\n" : match.startsWith("\n") ? "\n" : "";
+          return offset === 0 ? "" : prefix;
+        });
+      }
+
       if (originalData) {
         terminalRef.current?.write(originalData);
         terminalRef.current?.scrollToBottom();
@@ -208,22 +230,38 @@ function TerminalPane({
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[#1e1e1e]">
       <div className="flex items-center justify-between gap-2 border-b border-[#2d2d30] bg-[#181818] px-4 py-3 text-sm font-semibold text-[#cccccc]">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
           <TerminalSquare className="h-4 w-4 shrink-0 text-[#4fc1ff]" />
-          <div className="flex min-w-0 items-center gap-2">
+          <div className="scrollbar-thin flex min-w-0 flex-1 items-center gap-2 overflow-x-auto overflow-y-hidden pb-1">
             {sessions.map((session) => (
-              <button
+              <div
                 key={session.id}
-                className={`rounded-md px-3 py-1.5 text-xs transition ${
+                className={`flex shrink-0 items-center gap-1 rounded-md pr-1 transition ${
                   session.id === activeSessionId
                     ? "bg-[#094771] text-white"
                     : "bg-[#252526] text-[#a9b1ba] hover:bg-[#2a2d2e] hover:text-white"
                 }`}
-                onClick={() => onActiveSessionChange(session.id)}
-                type="button"
               >
-                {session.label}
-              </button>
+                <button
+                  className="px-3 py-1.5 text-xs"
+                  onClick={() => onActiveSessionChange(session.id)}
+                  type="button"
+                >
+                  {session.label}
+                </button>
+                <button
+                  className="rounded-sm p-1 text-current/80 transition hover:bg-black/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={sessions.length <= 1}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCloseSession(session.id);
+                  }}
+                  title={sessions.length <= 1 ? "At least one terminal must stay open" : `Close ${session.label}`}
+                  type="button"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
             ))}
             <Button
               className="h-8 px-2 text-[#cccccc] hover:bg-[#2a2d2e]"

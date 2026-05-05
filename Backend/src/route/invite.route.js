@@ -25,6 +25,11 @@ router.get("/my-invites",verifyJWT,inviteController.showInvites);
 router.post("/action",verifyJWT,inviteController.ActionOnInvite);
 
 // ===============================
+// 🗑️ REMOVE INVITE FROM HISTORY
+// ===============================
+router.delete("/:inviteId",verifyJWT,inviteController.deleteInvite);
+
+// ===============================
 // 📊 COUNT / STATS OF SENT INVITES
 // ===============================
 router.get("/stats",verifyJWT,inviteController.NumberOfInvitesSend);

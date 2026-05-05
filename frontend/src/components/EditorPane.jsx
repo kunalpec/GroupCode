@@ -1,8 +1,8 @@
 import Editor from "@monaco-editor/react";
-import { Save } from "lucide-react";
+import { Play, Save } from "lucide-react";
 import { Button } from "./ui/button";
 
-function EditorPane({ value, fileName, onChange, onMount, onSave, collaborators }) {
+function EditorPane({ value, fileName, onChange, onMount, onSave, onSaveAndRun, collaborators }) {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[#1e1e1e]">
       <div className="flex items-center justify-between border-b border-[#2d2d30] bg-[#252526] px-4 py-2.5">
@@ -14,10 +14,16 @@ function EditorPane({ value, fileName, onChange, onMount, onSave, collaborators 
               : "Realtime sync ready"}
           </p>
         </div>
-        <Button size="sm" onClick={onSave} disabled={!fileName}>
-          <Save className="mr-2 h-4 w-4" />
-          Save
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={onSave} disabled={!fileName} variant="secondary">
+            <Save className="mr-2 h-4 w-4" />
+            Save
+          </Button>
+          <Button size="sm" onClick={onSaveAndRun} disabled={!fileName}>
+            <Play className="mr-2 h-4 w-4" />
+            Save & Run
+          </Button>
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">

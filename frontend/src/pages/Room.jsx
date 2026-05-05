@@ -116,6 +116,7 @@ function Room() {
   const selectedFileRef = useRef("");
   const refreshTimerRef = useRef(null);
   const refreshFollowUpTimerRef = useRef(null);
+  const nextTerminalIndexRef = useRef(2);
 
   const room = useMemo(
     () => currentRoom || rooms.find((item) => item.inviteToken === inviteToken) || null,
@@ -152,6 +153,7 @@ function Room() {
     setCollaborators([]);
     setTerminalSessions([createTerminalSession(1)]);
     setActiveTerminalId("terminal-1");
+    nextTerminalIndexRef.current = 2;
     dispatch(resetRoomWorkspace());
     dispatch(setRoomUsers([]));
   }, [dispatch, inviteToken]);
@@ -502,20 +504,43 @@ function Room() {
   };
 
   const handleCreateTerminalSession = () => {
-    setTerminalSessions((current) => {
-      const nextIndex = current.length + 1;
-      const nextSession = createTerminalSession(nextIndex);
-      setActiveTerminalId(nextSession.id);
-      setIsTerminalVisible(true);
-      setActiveTab("terminal");
-      return [...current, nextSession];
-    });
+    const nextSession = createTerminalSession(nextTerminalIndexRef.current);
+    nextTerminalIndexRef.current += 1;
+
+    setTerminalSessions((current) => [...current, nextSession]);
+    setActiveTerminalId(nextSession.id);
+    setIsTerminalVisible(true);
+    setActiveTab("terminal");
   };
 
   const handleClearTerminalSession = (terminalId) => {
     setTerminalSessions((current) =>
       current.map((session) => (session.id === terminalId ? { ...session, buffer: "" } : session)),
     );
+  };
+
+  const handleCloseTerminalSession = (terminalId) => {
+    setTerminalSessions((current) => {
+      if (current.length <= 1) {
+        return current;
+      }
+
+      const closingIndex = current.findIndex((session) => session.id === terminalId);
+      if (closingIndex === -1) {
+        return current;
+      }
+
+      const nextSessions = current.filter((session) => session.id !== terminalId);
+
+      if (activeTerminalId === terminalId) {
+        const fallbackSession = nextSessions[closingIndex] || nextSessions[closingIndex - 1] || nextSessions[0];
+        if (fallbackSession) {
+          setActiveTerminalId(fallbackSession.id);
+        }
+      }
+
+      return nextSessions;
+    });
   };
 
   const handleRunFile = async (terminalId) => {
@@ -556,6 +581,11 @@ function Room() {
         variant: "destructive",
       });
     }
+  };
+
+  const handleSaveAndRun = async () => {
+    const targetTerminalId = activeTerminalId || terminalSessions[0]?.id || "terminal-1";
+    await handleRunFile(targetTerminalId);
   };
 
   const refreshDirectory = async () => {
@@ -934,7 +964,7 @@ function Room() {
         </div>
       ) : (
         <div
-          className="grid min-h-0 overflow-hidden"
+          className="grid min-h-0 overflow-hidden transition-[grid-template-columns] duration-200 ease-out"
           style={{
             gridTemplateColumns: `${
               isExplorerVisible ? "18rem" : "0rem"
@@ -942,7 +972,7 @@ function Room() {
           }}
         >
           <aside
-            className={`min-h-0 overflow-hidden border-r border-[#2d2d30] ${
+            className={`min-h-0 overflow-hidden border-r border-[#2d2d30] transition-opacity duration-150 ${
               isExplorerVisible ? "opacity-100" : "pointer-events-none opacity-0"
             }`}
           >
@@ -977,6 +1007,7 @@ function Room() {
                   editor.onDidChangeCursorPosition(handleCursorChange);
                 }}
                 onSave={handleSave}
+                onSaveAndRun={handleSaveAndRun}
                 value={editorContent}
               />
             </div>
@@ -1020,6 +1051,7 @@ function Room() {
                       canRunFile={Boolean(selectedFile)}
                       inviteToken={inviteToken}
                       onActiveSessionChange={setActiveTerminalId}
+                      onCloseSession={handleCloseTerminalSession}
                       onClearSession={handleClearTerminalSession}
                       onCreateSession={handleCreateTerminalSession}
                       onHide={() => {
@@ -1089,7 +1121,7 @@ function Room() {
           </section>
 
           <aside
-            className={`min-h-0 min-w-0 overflow-hidden bg-[#181818] ${
+            className={`min-h-0 min-w-0 overflow-hidden bg-[#181818] transition-opacity duration-150 ${
               isRightPanelVisible ? "opacity-100" : "pointer-events-none opacity-0"
             }`}
           >

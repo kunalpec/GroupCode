@@ -1,36 +1,37 @@
 import { Room } from "../model/room.model.js";
 import { Invite } from "../model/invite.model.js";
 import { User } from "../model/user.model.js";
-
 import { ApiError } from "../util/ApiError.util.js";
 import { asyncHandler } from "../util/asyncHandler.util.js";
 import { ApiResponse } from "../util/ApiResponse.util.js";
 import { mailSender } from "../util/mailSender.util.js";
 
-// ===============================
-// 1. SEND INVITE
-// ===============================
 const sendInvite = asyncHandler(async (req, res) => {
   const ownerId = req.user._id;
   const { inviteToken, email } = req.body;
 
+  if (!inviteToken || !email) {
+    throw new ApiError(400, "Invite token and email are required");
+  }
+
   const room = await Room.findOne({ inviteToken });
   if (!room) throw new ApiError(404, "Room not found");
 
-  // 🔐 Only owner
   if (room.owner.toString() !== ownerId.toString()) {
     throw new ApiError(403, "Unauthorized");
   }
 
-  const invitedUser = await User.findOne({ email });
+  const invitedUser = await User.findOne({ email: String(email).trim().toLowerCase() });
   if (!invitedUser) throw new ApiError(404, "User not found");
 
-  // ❌ self invite
   if (invitedUser._id.toString() === ownerId.toString()) {
     throw new ApiError(400, "Cannot invite yourself");
   }
 
-  // ❌ duplicate
+  if (room.users.some((memberId) => memberId.toString() === invitedUser._id.toString())) {
+    throw new ApiError(400, "User is already a member of this room");
+  }
+
   const existing = await Invite.findOne({
     room_id: room._id,
     userother: invitedUser._id,
@@ -57,21 +58,18 @@ const sendInvite = asyncHandler(async (req, res) => {
     `,
   );
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, { invite }, "Invite sent successfully"));
+  return res.status(200).json(
+    new ApiResponse(200, "Invite sent successfully", { invite }),
+  );
 });
 
-// ===============================
-// 2. SEARCH USER
-// ===============================
 const searchUserByEmail = asyncHandler(async (req, res) => {
   const { query } = req.query;
 
   if (!query) {
     return res
       .status(200)
-      .json(new ApiResponse(200, { users: [] }, "No query provided"));
+      .json(new ApiResponse(200, "No query provided", { users: [] }));
   }
 
   const users = await User.find({
@@ -79,33 +77,25 @@ const searchUserByEmail = asyncHandler(async (req, res) => {
       { name: { $regex: query, $options: "i" } },
       { email: { $regex: query, $options: "i" } },
     ],
-  }).select("name email avatar"); // ✅ limit fields
+  }).select("name email avatar");
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, { users }, "Users fetched successfully"));
+  return res.status(200).json(
+    new ApiResponse(200, "Users fetched successfully", { users }),
+  );
 });
 
-// ===============================
-// 3. SHOW INVITES
-// ===============================
 const showInvites = asyncHandler(async (req, res) => {
-  const user = req.user;
-
-  const invites = await Invite.find({ userother: user._id })
-    .populate("room_id", "inviteToken")
-    .populate("userown", "name email avatar") // ✅ fixed
+  const invites = await Invite.find({ userother: req.user._id })
+    .populate("room_id", "inviteToken roomName")
+    .populate("userown", "name email avatar")
     .sort({ createdAt: -1 })
     .limit(10);
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, { invites }, "Invites fetched successfully"));
+  return res.status(200).json(
+    new ApiResponse(200, "Invites fetched successfully", { invites }),
+  );
 });
 
-// ===============================
-// 4. ACCEPT / DECLINE INVITE
-// ===============================
 const ActionOnInvite = asyncHandler(async (req, res) => {
   const { inviteId, action } = req.body;
   const user = req.user;
@@ -113,61 +103,68 @@ const ActionOnInvite = asyncHandler(async (req, res) => {
   const invite = await Invite.findById(inviteId);
   if (!invite) throw new ApiError(404, "Invite not found");
 
-  // 🔐 Only invited user
   if (invite.userother.toString() !== user._id.toString()) {
     throw new ApiError(403, "Not authorized");
   }
 
-  // ❌ already handled
   if (invite.status !== "pending") {
     throw new ApiError(400, "Already processed");
   }
 
-  // ❌ invalid action
   if (!["accepted", "declined"].includes(action)) {
     throw new ApiError(400, "Invalid action");
   }
 
-  // ✅ update status
   invite.status = action;
   await invite.save();
 
-  // ✅ if accepted → add to room
   if (action === "accepted") {
     const room = await Room.findById(invite.room_id);
-
-    if (!room.users.includes(user._id)) {
+    if (room && !room.users.some((memberId) => memberId.toString() === user._id.toString())) {
       room.users.push(user._id);
       await room.save();
     }
   }
 
   return res.status(200).json(
-    new ApiResponse(
-      200,
-      { invite },
-      action === "accepted" ? "Invite accepted" : "Invite declined"
-    )
+    new ApiResponse(200, action === "accepted" ? "Invite accepted" : "Invite declined", {
+      invite,
+    }),
+  );
+});
+
+const deleteInvite = asyncHandler(async (req, res) => {
+  const { inviteId } = req.params;
+
+  const invite = await Invite.findById(inviteId);
+  if (!invite) throw new ApiError(404, "Invite not found");
+
+  if (invite.userother.toString() !== req.user._id.toString()) {
+    throw new ApiError(403, "Not authorized");
+  }
+
+  await invite.deleteOne();
+
+  return res.status(200).json(
+    new ApiResponse(200, "Invite removed successfully", { inviteId }),
   );
 });
 
 const NumberOfInvitesSend = asyncHandler(async (req, res) => {
-  const userId = req.user._id;
-
   const count = await Invite.countDocuments({
-    userown: userId,
+    userown: req.user._id,
   });
 
   return res.status(200).json(
-    new ApiResponse(200, { count }, "Invite count fetched")
+    new ApiResponse(200, "Invite count fetched", { count }),
   );
 });
 
-// ===============================
 export const inviteController = {
   sendInvite,
   searchUserByEmail,
   showInvites,
   ActionOnInvite,
-  NumberOfInvitesSend
+  deleteInvite,
+  NumberOfInvitesSend,
 };

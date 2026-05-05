@@ -29,13 +29,13 @@ function DialogContent({ className, children, ...props }) {
       <DialogOverlay />
       <DialogPrimitive.Content
         className={cn(
-          "fixed left-1/2 top-1/2 z-50 w-[min(92vw,32rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl",
+          "fixed left-1/2 top-1/2 z-50 w-[min(92vw,32rem)] max-h-[90vh] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-none border border-slate-700 bg-slate-900 p-6 shadow-2xl",
           className,
         )}
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute right-4 top-4 text-slate-400 transition hover:text-white">
+        <DialogPrimitive.Close className="absolute right-5 top-5 z-10 p-1 text-slate-300 transition hover:text-white">
           <X className="h-4 w-4" />
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>

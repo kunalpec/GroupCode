@@ -5,6 +5,7 @@ import { containerController } from "../controller/container.controller.js";
 const router = Router();
 
 router.post("/create", verifyJWT, containerController.createUserContainer);
+router.get("/info", verifyJWT, containerController.getContainerInfo);
 router.post("/start", verifyJWT, containerController.startUserContainer);
 router.post("/stop", verifyJWT, containerController.stopUserContainer);
 router.get("/status", verifyJWT, containerController.getContainerStatus);
